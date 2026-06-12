@@ -1,0 +1,31 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv*/
+venv/
+env/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+.vite/
+*.log
+
+# --- Generated data artifacts (rebuilt from source exports; not committed) ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- PERSONAL TRAINING DATA — never committed (privacy) ---
+WKO5 Exports/
+
+# --- Third-party copyrighted reference material — not ours to redistribute ---
+Model Training/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
