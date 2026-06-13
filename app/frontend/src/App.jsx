@@ -1,0 +1,79 @@
+import React, { useEffect, useRef, useState } from "react";
+import Watchman from "./Watchman.jsx";
+import Coach from "./Coach.jsx";
+
+export default function App() {
+  const [meta, setMeta] = useState(null);
+  const [err, setErr] = useState(null);
+  const [upload, setUpload] = useState({ state: "idle", msg: "" });
+  const [dataKey, setDataKey] = useState(0); // bump to remount dashboard/coach after a refresh
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    fetch(`/api/meta`).then((r) => r.json()).then(setMeta).catch((e) => setErr(String(e)));
+  }, []);
+
+  async function onFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setUpload({ state: "busy", msg: `Ingesting ${f.name}…` });
+    try {
+      const body = new FormData();
+      body.append("file", f);
+      const res = await fetch(`/api/upload`, { method: "POST", body });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.detail || "upload failed");
+      const mt = await fetch(`/api/meta`).then((r) => r.json());
+      setMeta(mt);
+      setDataKey((k) => k + 1);
+      setUpload({ state: "ok", msg: `Updated — data now through ${out.data_through}.` });
+      setTimeout(() => setUpload({ state: "idle", msg: "" }), 6000);
+    } catch (e2) {
+      setUpload({ state: "err", msg: String(e2.message || e2) });
+    }
+  }
+
+  if (err)
+    return (
+      <div className="shell">
+        <div className="appbar"><h1>Training Coach</h1></div>
+        <p className="err">API error: {err}. Is the backend running on :8000?</p>
+      </div>
+    );
+  if (!meta)
+    return (
+      <div className="shell">
+        <div className="appbar"><h1>Training Coach</h1></div>
+        <p style={{ color: "var(--muted)", padding: 14 }}>Loading…</p>
+      </div>
+    );
+
+  return (
+    <div className="shell">
+      <div className="appbar">
+        <h1>
+          Training Coach <small>data through {meta.date_max}</small>
+        </h1>
+        <div className="appbar-actions">
+          {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
+          <input type="file" accept=".xlsx" ref={fileRef} onChange={onFile}
+            style={{ display: "none" }} />
+          <button className="update-btn" disabled={upload.state === "busy"}
+            onClick={() => fileRef.current?.click()}>
+            {upload.state === "busy" ? "Updating…" : "↑ Update training data"}
+          </button>
+          <span className={"pill " + meta.board_status}>{meta.board_status}</span>
+        </div>
+      </div>
+      <div className="cols">
+        <div className="left">
+          <Watchman key={"w" + dataKey} meta={meta} />
+        </div>
+        <div className="right">
+          <Coach key={"c" + dataKey} meta={meta} />
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -194,16 +194,12 @@ def read_tiz(ws):
 
 
 def dedup_workouts(workouts):
-    """Dedup by (started_at, activity_type, duration_sec). Keeps first seen."""
-    seen = set()
-    out = []
+    """Dedup by (started_at, activity_type, duration_sec). Keeps LAST seen — callers pass
+    workouts in ascending precedence order, so the newer file's version wins."""
+    by_key = {}
     for w in workouts:
-        key = (w["started_at"], w.get("activity_type"), w.get("duration_sec"))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(w)
-    return out
+        by_key[(w["started_at"], w.get("activity_type"), w.get("duration_sec"))] = w
+    return list(by_key.values())
 
 
 def _classify(basename):
@@ -240,30 +236,22 @@ def build_database(db_path, exports_dir, loaded_at=None):
 
     if loaded_at is None:
         loaded_at = "unknown"  # caller stamps real time; scripts avoid Date.now-style calls
-    files = sorted(glob.glob(os.path.join(exports_dir, "*.xlsx")))
+    # PRECEDENCE: a date covered by multiple exports resolves to the NEWER file (by mtime);
+    # on an mtime tie, a full-year file beats a weekly snapshot. We process lowest-precedence
+    # first so the winner is applied LAST — PMC/TiZ via dict-update, workouts via keep-last
+    # dedup. Weekly files are first-class: all three sheets are ingested like the yearly ones.
+    # (Going forward, weekly files cover new, non-overlapping weeks; precedence only matters
+    # where exports overlap, e.g. a weekly file replacing a yearly file's PMC projection rows.)
+    def _precedence(f):
+        is_week = _classify(os.path.basename(f)) == "Week"
+        return (os.path.getmtime(f), 0 if is_week else 1)   # weekly before yearly on tie
+    files = sorted(glob.glob(os.path.join(exports_dir, "*.xlsx")), key=_precedence)
+
     meta_rows = []
     workouts = []
     pmc_by_date = {}
     tiz_by_date = {}
     pmc_conflicts = []
-
-    # Identify the weekly file and the partial-2026 TH cutoff for the weekly-TH rule.
-    th_files = [f for f in files if _classify(os.path.basename(f)) == "TH"]
-
-    def th_max_date(path):
-        wb = openpyxl.load_workbook(path, data_only=True, read_only=False)
-        try:
-            recs = read_training_history(wb.active, os.path.basename(path))
-        finally:
-            wb.close()
-        _, dmax = _date_range([r["date"] for r in recs])
-        return dmax
-
-    non_weekly_th_max = None
-    for f in th_files:
-        dmax = th_max_date(f)
-        if dmax and (non_weekly_th_max is None or dmax > non_weekly_th_max):
-            non_weekly_th_max = dmax
 
     for f in files:
         base = os.path.basename(f)
@@ -274,60 +262,41 @@ def build_database(db_path, exports_dir, loaded_at=None):
                 sheet_fam = fam
                 if fam == "Week":
                     title = ws.title.lower()
-                    if "training" in title:
-                        sheet_fam = "TH"
-                    elif "pmc" in title:
-                        sheet_fam = "PMC"
-                    elif "tiz" in title:
-                        sheet_fam = "TiZ"
+                    sheet_fam = ("TH" if "training" in title else
+                                 "PMC" if "pmc" in title else
+                                 "TiZ" if "tiz" in title else fam)
 
                 if sheet_fam == "TH":
                     recs = read_training_history(ws, base)
-                    if fam == "Week":
-                        # Weekly file is validation-only EXCEPT TH rows beyond the
-                        # last non-weekly TH date (i.e. the 2026-05-29 row).
-                        keep = [r for r in recs if non_weekly_th_max is None or r["date"] > non_weekly_th_max]
-                        role = "validation-only"
-                        rows_loaded = len(keep)
-                        workouts.extend(keep)
-                    else:
-                        keep = recs
-                        role = "loaded"
-                        rows_loaded = len(keep)
-                        workouts.extend(keep)
+                    workouts.extend(recs)
                     dmin, dmax = _date_range([r["date"] for r in recs])
-                    meta_rows.append((base, ws.title, sheet_fam, role, len(recs), rows_loaded, len(recs) - rows_loaded, dmin, dmax))
+                    meta_rows.append((base, ws.title, sheet_fam, "loaded", len(recs),
+                                      len(recs), 0, dmin, dmax))
 
                 elif sheet_fam == "PMC":
                     per_date, conflicts = read_pmc(ws)
                     pmc_conflicts.extend((base,) + c for c in conflicts)
-                    if fam == "Week":
-                        role, rows_loaded = "validation-only", 0
-                    else:
-                        role, rows_loaded = "loaded", len(per_date)
-                        for d, vals in per_date.items():
-                            pmc_by_date.setdefault(d, {}).update(vals)
+                    for d, vals in per_date.items():
+                        pmc_by_date.setdefault(d, {}).update(vals)   # newer applied last -> wins
                     dmin, dmax = _date_range(list(per_date))
-                    meta_rows.append((base, ws.title, sheet_fam, role, len(per_date), rows_loaded, 0, dmin, dmax))
+                    meta_rows.append((base, ws.title, sheet_fam, "loaded", len(per_date),
+                                      len(per_date), 0, dmin, dmax))
 
                 elif sheet_fam == "TiZ":
                     per_date = read_tiz(ws)
-                    if fam == "Week":
-                        role, rows_loaded = "validation-only", 0
-                    else:
-                        role, rows_loaded = "loaded", len(per_date)
-                        for d, vals in per_date.items():
-                            tiz_by_date.setdefault(d, {}).update(vals)
+                    for d, vals in per_date.items():
+                        tiz_by_date.setdefault(d, {}).update(vals)
                     dmin, dmax = _date_range(list(per_date))
-                    meta_rows.append((base, ws.title, sheet_fam, role, len(per_date), rows_loaded, 0, dmin, dmax))
+                    meta_rows.append((base, ws.title, sheet_fam, "loaded", len(per_date),
+                                      len(per_date), 0, dmin, dmax))
         finally:
             wb.close()
 
-    workouts = dedup_workouts(workouts)
+    workouts = dedup_workouts(workouts)   # keep-last == newer file wins (processed last)
 
     # --- horizon: last ACTUAL ride day. Wellness-only days do not extend it. ---
     ride_dates = [w["date"] for w in workouts if w["is_cycling"]]
-    horizon = max(ride_dates) if ride_dates else (non_weekly_th_max or None)
+    horizon = max(ride_dates) if ride_dates else None
 
     # --- date spine: full calendar span across every loaded source (incl. PMC future). ---
     all_dates = ([w["date"] for w in workouts] + list(pmc_by_date) + list(tiz_by_date))
