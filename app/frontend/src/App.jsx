@@ -9,6 +9,7 @@ export default function App() {
   const [err, setErr] = useState(null);
   const [upload, setUpload] = useState({ state: "idle", msg: "" });
   const [dataKey, setDataKey] = useState(0); // bump to remount dashboard/coach after a refresh
+  const [planKey, setPlanKey] = useState(0); // bump to remount ONLY the calendar (keeps chat alive)
   const [showProfile, setShowProfile] = useState(false);
   const [view, setView] = useState("dashboard");  // "dashboard" | "calendar"
   const fileRef = useRef(null);
@@ -87,10 +88,10 @@ export default function App() {
         <div className="left">
           {view === "dashboard"
             ? <Watchman key={"w" + dataKey} meta={meta} />
-            : <Calendar key={"cal" + dataKey} />}
+            : <Calendar key={"cal" + dataKey + "-" + planKey} />}
         </div>
         <div className="right">
-          <Coach key={"c" + dataKey} meta={meta} />
+          <Coach key={"c" + dataKey} meta={meta} onPlanChanged={() => setPlanKey((k) => k + 1)} />
         </div>
       </div>
     </div>

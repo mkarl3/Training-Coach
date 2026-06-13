@@ -71,9 +71,57 @@ def fit_blocks(n_weeks, cfg):
     return seq[:n_weeks]
 
 
-def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CALENDAR):
+def diff_plans(old, new):
+    """What a proposed input change WOULD do — computed by comparing two generated plans, never
+    by hand-editing numbers. Returns changed weeks (keyed by week_start) + a headline summary.
+    The propose step shows this; nothing is applied until the athlete confirms."""
+    if not old or "error" in old:
+        return {"error_old": old.get("error") if old else "no prior plan"}
+    if "error" in new:
+        return {"error_new": new["error"]}
+    ow = {w["week_start"]: w for w in old["weeks"]}
+    nw = {w["week_start"]: w for w in new["weeks"]}
+    fields = ("weekly_tss_target", "ctl_target", "planned_ramp", "is_recovery",
+              "intensity_capped", "prescribed_distribution")
+    changed = []
+    for ws in sorted(set(ow) | set(nw)):
+        a, b = ow.get(ws), nw.get(ws)
+        if a is None:
+            changed.append({"week_start": ws, "added": True, "block": b["block"]})
+            continue
+        if b is None:
+            changed.append({"week_start": ws, "removed": True, "block": a["block"]})
+            continue
+        deltas = {f: [a.get(f), b.get(f)] for f in fields if a.get(f) != b.get(f)}
+        if deltas:
+            changed.append({"week_start": ws, "week": b["week"], "block": b["block"], "deltas": deltas})
+    om, nm = old["meta"], new["meta"]
+    return {
+        "weeks_changed": changed,
+        "n_changed": len(changed),
+        "summary": {
+            "weeks": [om["weeks"], nm["weeks"]],
+            "peak_ctl_achieved": [om["peak_ctl_achieved"], nm["peak_ctl_achieved"]],
+            "target_peak_ctl": [om["target_peak_ctl"], nm["target_peak_ctl"]],
+            "target_reached": [om["target_reached"], nm["target_reached"]],
+        },
+    }
+
+
+def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CALENDAR,
+                  availability=None, intensity_caps=None):
     """Return {"meta": {...}, "weeks": [...]} or {"error": ...}. The plan spans the whole
-    season (start -> A-race); weeks already elapsed carry ACTUAL TSS/CTL for planned-vs-actual."""
+    season (start -> A-race); weeks already elapsed carry ACTUAL TSS/CTL for planned-vs-actual.
+
+    Transient diary-driven modifiers (Slice 4.5), each a list of {start_date,end_date,...}:
+      availability   per-week hours overrides {hours, reason} — relax/tighten the time budget
+                     for the overlapping week (an opportunity UP just hands the binding role to
+                     the ramp/ACWR/target guardrails; it does NOT relax them).
+      intensity_caps {reason} windows that hold the week easy (ramp <= 0, aerobic only) — the
+                     'keep it easy' of a re-entry or an ongoing limiter. Caps can only TIGHTEN.
+    """
+    availability = availability or []
+    intensity_caps = intensity_caps or []
     today = dt.date.fromisoformat(as_of)
     wstart = profile.week_starts_on
     a_race = pick_a_race(events, today)
@@ -184,17 +232,30 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
         if ua:
             is_recovery, ramp = True, min(ramp, -trough)
             fired.append(f"unavailable ({ua.get('reason') or 'blocked'}) -> recovery")
+        # 5b. intensity cap (re-entry / ongoing limiter "keep it easy") -> hold, aerobic only
+        icap = _overlaps(mon, we, intensity_caps)
+        intensity_capped = bool(icap)
+        if icap:
+            ramp = min(ramp, 0.0)                          # tighten only: hold CTL, don't build
+            fired.append(f"intensity cap ({icap.get('reason') or 'easy'}) -> aerobic only, hold CTL")
 
         target = ctl + ramp
         weekly_tss = 7 * ctl + ramp_coef * ramp
-        # 6. time-budget cap (availability from the season) — binds the achievable ramp
-        max_tss = budget_h * if2 * 100.0
+        # 6. time-budget cap — binds the achievable ramp. A per-week availability override (diary)
+        #    replaces the season budget for the overlapping week; UP just lets the next guardrail
+        #    (ramp cap / target) bind instead, DOWN tightens.
+        av = _overlaps(mon, we, availability)
+        week_hours = av["hours"] if av else budget_h
+        max_tss = week_hours * if2 * 100.0
         if weekly_tss > max_tss and not ua:
             new_ramp = (max_tss - 7 * ctl) / ramp_coef
             if round(ramp, 1) - round(new_ramp, 1) >= 0.1:
                 fired.append(f"time_budget_cap {weekly_tss:.0f}->{max_tss:.0f} TSS "
-                             f"({budget_h:.1f} h @ IF {plan_if}) -> ramp {ramp:+.1f}->{new_ramp:+.1f}")
+                             f"({week_hours:.1f} h @ IF {plan_if}) -> ramp {ramp:+.1f}->{new_ramp:+.1f}")
             ramp, target, weekly_tss = new_ramp, ctl + new_ramp, max_tss
+        if av:
+            fired.append(f"availability override {week_hours:.1f} h ({av.get('reason') or 'this week'}) "
+                         f"— guardrails still bind the usable load")
 
         est_hours = weekly_tss / (if2 * 100.0)
         long_ride = (cfg.long_ride_hours.get(family) if long_priority and family in ("base", "build", "peak")
@@ -220,8 +281,9 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
             "week": i + 1, "week_start": mon.isoformat(), "week_end": we.isoformat(),
             "block": bname, "family": family, "focus": focus,
             "target_metric": target_metric, "advance_when": advance_when,
-            "field_test": bool(is_last and family != "taper"),
+            "field_test": bool(is_last and family != "taper" and not intensity_capped),
             "is_recovery": bool(is_recovery),
+            "intensity_capped": intensity_capped,
             "status": status,
             "ctl_start": round(ctl, 1), "ctl_target": round(target, 1),
             "planned_ramp": round(ramp, 1),
@@ -229,7 +291,8 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
             "single_ride_tss_cap": single_ride_cap,
             "est_hours": round(est_hours, 1),
             "actual_tss": actual_tss, "actual_ctl": actual_ctl,
-            "emphasis": label, "prescribed_distribution": distribution,
+            "emphasis": label,
+            "prescribed_distribution": "aerobic only — intensity capped" if intensity_capped else distribution,
             "long_ride_hours": long_ride,
             "rationale": "; ".join(rationale),
             "constraints_fired": fired,
@@ -263,6 +326,7 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
                 "gray_band_frac": gray_band, "gray_band_cap": band_cap,
                 "tiz_concentration": tiz_conc, "tiz_concentration_cap": conc_cap,
             },
+            "modifiers": {"availability": availability, "intensity_caps": intensity_caps},
         },
         "weeks": rows,
     }

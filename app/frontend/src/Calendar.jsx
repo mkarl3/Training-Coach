@@ -94,14 +94,20 @@ function EventForm({ eventTypes, onAdded }) {
 export default function Calendar() {
   const [data, setData] = useState(null);   // /api/season
   const [plan, setPlan] = useState(null);
+  const [adjustments, setAdjustments] = useState([]);
   const [loading, setLoading] = useState(true);
 
   async function load() {
-    const [s, p] = await Promise.all([
+    const [s, p, a] = await Promise.all([
       fetch("/api/season").then((r) => r.json()),
       fetch("/api/plan").then((r) => r.json()),
+      fetch("/api/plan/adjustments").then((r) => r.json()).catch(() => ({ adjustments: [] })),
     ]);
-    setData(s); setPlan(p.error ? null : p); setLoading(false);
+    setData(s); setPlan(p.error ? null : p); setAdjustments(a.adjustments || []); setLoading(false);
+  }
+  async function undoAdjustment(id) {
+    await fetch(`/api/plan/adjustment/${id}/undo`, { method: "POST" }).catch(() => {});
+    load();
   }
   useEffect(() => { load(); }, []);
 
@@ -192,6 +198,24 @@ export default function Calendar() {
           </table>
           <p className="muted small">Every number is computed in code from your history + profile + season.
             Ask the coach to explain any week, or say e.g. "my race moved two weeks" to recompute.</p>
+        </div>
+      )}
+
+      {adjustments.length > 0 && (
+        <div className="panel">
+          <h2>Plan adjustments</h2>
+          <p className="muted small">Diary-driven changes you confirmed. Undo restores the plan; the
+            entry stays here as history.</p>
+          {adjustments.map((a) => (
+            <div className={"adj-row" + (a.active ? "" : " inactive")} key={a.id}>
+              <span className={"adj-dot " + (a.active ? "on" : "off")} />
+              <span className="adj-sum">{a.summary}</span>
+              <span className="muted small">{a.created_at.slice(0, 10)}</span>
+              {a.active
+                ? <button className="del" onClick={() => undoAdjustment(a.id)}>undo</button>
+                : <span className="muted small adj-tag">reverted</span>}
+            </div>
+          ))}
         </div>
       )}
     </div>

@@ -188,3 +188,15 @@ def notes_for_window(conn, start, end, athlete_id=1):
     return list(conn.execute(
         "SELECT date, category, note, quote FROM subjective_note "
         "WHERE athlete_id=? AND date BETWEEN ? AND ? ORDER BY date", (athlete_id, start, end)))
+
+
+def notes_by_checkin_since(conn, since_created_at, athlete_id=1):
+    """Recent notes keyed by their CHECK-IN (not note date), for recurring-theme detection — the
+    athlete often dates many notes to the same day, so 'across check-ins' must count check-ins.
+    Filters on when the check-in was recorded. Returns (checkin_id, category, quote) rows."""
+    ensure_schema(conn)
+    return list(conn.execute(
+        "SELECT n.checkin_id, n.category, n.quote FROM subjective_note n "
+        "JOIN checkin c ON c.id = n.checkin_id "
+        "WHERE n.athlete_id=? AND c.created_at >= ? ORDER BY n.checkin_id",
+        (athlete_id, since_created_at)))

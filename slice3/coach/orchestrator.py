@@ -66,7 +66,7 @@ class Coach:
     """Wires retrieval + findings + notes + memory into per-turn LLM calls."""
 
     def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT,
-                 profile=None, plan_summary=None):
+                 profile=None, plan_summary=None, soft_advisories=None):
         import anthropic
         from wko_metrics import DEFAULT_PROFILE
         self.conn = conn                      # coach.db (notes + conversations)
@@ -80,6 +80,9 @@ class Coach:
         # The deterministic calendar (slice4), as a plain text summary the coach EXPLAINS.
         # The coach never computes these numbers — code does; this is read-only context.
         self.plan_summary = plan_summary
+        # Recurring subjective themes (slice4.5 step 3), as soft context. STRICTLY non-binding:
+        # the coach may acknowledge these; it must NEVER change a plan number because of them.
+        self.soft_advisories = soft_advisories
 
     # ---- context assembly (the structural guarantee lives here) ----
     def _retrieve(self, question):
@@ -117,8 +120,11 @@ class Coach:
         prior = store.prior_checkin_dates(self.conn, conv_id)
         calendar = (f"CALENDAR (deterministic plan skeleton — explain it, do NOT recompute "
                     f"these numbers yourself):\n{self.plan_summary}\n\n" if self.plan_summary else "")
+        themes = (f"RECURRING CHECK-IN THEMES (soft signals — acknowledge them, but they must "
+                  f"NEVER change a plan number; only hard facts feed a recompute):\n"
+                  f"{self.soft_advisories}\n\n" if self.soft_advisories else "")
         return (f"ATHLETE PROFILE (fixed facts):\n{self._profile_context(as_of)}\n\n"
-                f"{calendar}"
+                f"{calendar}{themes}"
                 f"FINDINGS (deterministic, as of {as_of}):\n"
                 f"{_findings_context(self.watch_state, self.ranked_confirmed)}\n\n"
                 f"METHODOLOGY (retrieved for this question, corpus v{self.index.version}):\n{meth}\n\n"

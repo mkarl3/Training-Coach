@@ -49,3 +49,39 @@ CREATE TABLE IF NOT EXISTS unavailable_period (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_unavail_season ON unavailable_period(season_id);
+
+-- Transient plan modifiers (Slice 4.5 — diary-driven). Each bends one or more weeks without
+-- touching the season's standing inputs: 'availability' overrides the weekly hours for a window
+-- (an opportunity UP, or a reduced re-entry window DOWN); 'intensity_cap' holds a window easy
+-- (aerobic only, no CTL building) for a re-entry or an ongoing limiter. The generator reads the
+-- ACTIVE ones; undo flips active=0. Guardrails still bind — a modifier can only relax the time
+-- budget or tighten intensity, never loosen a safety limit.
+CREATE TABLE IF NOT EXISTS plan_modifier (
+    id          INTEGER PRIMARY KEY,
+    season_id   INTEGER NOT NULL REFERENCES season(id),
+    athlete_id  INTEGER NOT NULL DEFAULT 1,
+    kind        TEXT NOT NULL,                   -- 'availability' | 'intensity_cap'
+    start_date  TEXT NOT NULL,
+    end_date    TEXT NOT NULL,
+    hours       REAL,                            -- availability: hours/wk for the window
+    reason      TEXT,
+    active      INTEGER NOT NULL DEFAULT 1,      -- undo sets this 0
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_modifier_season ON plan_modifier(season_id, active);
+
+-- Adjustment audit trail (Slice 4.5). One row per APPLIED diary-driven change: what it was, a
+-- human summary, and how to undo it. The athlete sees this as plan history; undo deactivates the
+-- adjustment and the row it created. Nothing here is applied without the athlete confirming first.
+CREATE TABLE IF NOT EXISTS plan_adjustment (
+    id          INTEGER PRIMARY KEY,
+    season_id   INTEGER NOT NULL REFERENCES season(id),
+    athlete_id  INTEGER NOT NULL DEFAULT 1,
+    kind        TEXT NOT NULL,                   -- AdjustmentKind value (hard_time_loss, ...)
+    summary     TEXT NOT NULL,
+    applied     TEXT NOT NULL,                   -- JSON: what was written
+    undo_ref    TEXT NOT NULL,                   -- JSON: {"table":..., "id":...} to reverse
+    active      INTEGER NOT NULL DEFAULT 1,      -- undo sets this 0
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_adjustment_season ON plan_adjustment(season_id);

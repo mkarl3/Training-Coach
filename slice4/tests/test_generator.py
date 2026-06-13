@@ -107,6 +107,68 @@ def test_no_event_returns_error(m, as_of):
     assert "error" in generator.generate_plan(m, DEFAULT_PROFILE, season, [], [], as_of)
 
 
+def _bound_week(plan):
+    """An upcoming week whose load is actually pinned by the time budget (so relaxing hours
+    can move it). For a low-CTL athlete this is a tighter-budget mid-plan week, not week 1."""
+    return next(w for w in plan["weeks"]
+                if w["status"] == "upcoming"
+                and any("time_budget_cap" in c for c in w["constraints_fired"]))
+
+
+def test_availability_up_relaxes_budget_but_guardrails_still_bind(m, as_of):
+    # A 20h opportunity on an otherwise budget-bound week lets the ramp rise — but only to the
+    # ramp/target ceiling, NOT proportional to the extra hours.
+    season, events = season_at(as_of, weeks_out=16, hours=4.0)
+    base = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    wb = _bound_week(base)
+    av = [{"start_date": wb["week_start"], "end_date": wb["week_end"], "hours": 20.0, "reason": "family away"}]
+    up = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of, availability=av)
+    ub = [w for w in up["weeks"] if w["week_start"] == wb["week_start"]][0]
+    assert ub["weekly_tss_target"] > wb["weekly_tss_target"]          # opportunity used
+    assert ub["planned_ramp"] <= DEFAULT_PROFILE.ramp_rate_cap + 1e-9  # but capped by the guardrail
+    assert any("availability override" in c for c in ub["constraints_fired"])
+
+
+def test_availability_down_tightens(m, as_of):
+    season, events = season_at(as_of, weeks_out=16, hours=12.0)
+    base = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    w2 = base["weeks"][1]
+    av = [{"start_date": w2["week_start"], "end_date": w2["week_end"], "hours": 3.0, "reason": "busy"}]
+    down = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of, availability=av)
+    assert down["weeks"][1]["weekly_tss_target"] < w2["weekly_tss_target"]
+
+
+def test_intensity_cap_holds_easy_and_aerobic(m, as_of):
+    season, events = season_at(as_of, weeks_out=16, hours=12.0)
+    w = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)["weeks"][2]
+    cap = [{"start_date": w["week_start"], "end_date": w["week_end"], "reason": "knee"}]
+    capped = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of,
+                                     intensity_caps=cap)["weeks"][2]
+    assert capped["intensity_capped"] and capped["planned_ramp"] <= 0          # tightened: hold/ease
+    assert capped["prescribed_distribution"] == "aerobic only — intensity capped"
+    assert not capped["field_test"]                                            # don't test while easy
+    assert any("intensity cap" in c for c in capped["constraints_fired"])
+
+
+def test_diff_reports_changed_weeks_and_headline(m, as_of):
+    season, events = season_at(as_of, weeks_out=16, hours=4.0)
+    old = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    wb = _bound_week(old)
+    av = [{"start_date": wb["week_start"], "end_date": wb["week_end"], "hours": 20.0, "reason": "free"}]
+    new = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of, availability=av)
+    d = generator.diff_plans(old, new)
+    assert d["n_changed"] >= 1
+    hit = [c for c in d["weeks_changed"] if c["week_start"] == wb["week_start"]][0]
+    assert "weekly_tss_target" in hit["deltas"]
+    assert set(d["summary"]) == {"weeks", "peak_ctl_achieved", "target_peak_ctl", "target_reached"}
+
+
+def test_unchanged_inputs_yield_empty_diff(m, as_of):
+    season, events = season_at(as_of, weeks_out=16)
+    p = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    assert generator.diff_plans(p, p)["n_changed"] == 0
+
+
 def test_blocks_follow_the_matrix_and_are_base_heavy(m, as_of):
     season, events = season_at(as_of, weeks_out=20)
     plan = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)

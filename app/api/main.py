@@ -24,10 +24,10 @@ for p in ("slice4", "slice3", "slice2", "slice1", "slice0"):
 from wko_metrics import metrics, detectors, profile, AthleteProfile, DEFAULT_PROFILE  # noqa: E402
 from watchman import select, DEFAULT_SELECTION         # noqa: E402
 from wko_ingest import loader, validator               # noqa: E402
-from coach import store                                # noqa: E402
+from coach import store, capture as coach_capture     # noqa: E402
 from coach.orchestrator import Coach                   # noqa: E402
 from coach.retrieval import MethodologyIndex           # noqa: E402
-from plan import store as plan_store, generator as plan_gen  # noqa: E402
+from plan import store as plan_store, generator as plan_gen, diary as plan_diary  # noqa: E402
 
 WKO_DB = os.environ.get("WKO_DB", os.path.join(ROOT, "slice0", "wko.db"))
 EXPORTS_DIR = os.path.join(ROOT, "WKO5 Exports")
@@ -47,7 +47,9 @@ def _build_plan(conn, m, prof, as_of):
         return None, None
     events = plan_store.events_for(conn, season["id"])
     unavail = plan_store.unavailable_for(conn, season["id"])
-    plan = plan_gen.generate_plan(m, prof, season, events, unavail, as_of)
+    availability, intensity_caps = plan_store.active_modifiers(conn, season["id"])
+    plan = plan_gen.generate_plan(m, prof, season, events, unavail, as_of,
+                                  availability=availability, intensity_caps=intensity_caps)
     return season, plan
 
 
@@ -114,6 +116,9 @@ def _load_training_data():
                     plan_summary=_plan_summary(plan)),
         date_min=m.daily.index.min().strftime("%Y-%m-%d"),
     )
+    _S.setdefault("pending", {})       # ephemeral diary proposals awaiting confirmation
+    _S.setdefault("pending_seq", 0)
+    _refresh_advisories()              # seed recurring-theme context for the coach
 
 
 def _refresh_plan():
@@ -122,6 +127,22 @@ def _refresh_plan():
     _S["season"], _S["plan"] = season, plan
     _S["coach"].plan_summary = _plan_summary(plan)
     return plan
+
+
+def _compute_advisories(window_days=42):
+    """Recurring subjective themes across recent check-ins (Slice 4.5 step 3) — soft context,
+    never a plan change. Window is on real check-in time, not the data date."""
+    cutoff = (datetime.datetime.now() - datetime.timedelta(days=window_days)).isoformat()
+    rows = coach_capture.notes_by_checkin_since(_S["conn"], cutoff)
+    return plan_diary.recurring_themes(rows)
+
+
+def _refresh_advisories():
+    """Recompute themes and push the text into the coach context. Returns the structured themes."""
+    themes = _compute_advisories()
+    if _S.get("coach"):
+        _S["coach"].soft_advisories = plan_diary.advisory_text(themes)
+    return themes
 
 
 @app.on_event("startup")
@@ -218,18 +239,153 @@ def _try_season_edit(text, now):
     return note
 
 
+# --- diary-driven adjustment: PROPOSE -> (athlete confirms) -> apply + recompute (Slice 4.5) ---
+def _week_start(d):
+    return plan_gen._week_start(datetime.date.fromisoformat(d), _S["profile"].week_starts_on)
+
+
+def _edit_from_item(it):
+    """Map a classified hard diary item to a concrete INPUT edit (never load numbers). Returns a
+    dict the confirm step applies, or None if it can't be mapped safely."""
+    if it.kind.value == "hard_time_loss" and it.start_date and it.end_date:
+        return {"target": "unavailable", "start_date": it.start_date, "end_date": it.end_date,
+                "reason": it.reason or "illness/injury"}
+    if it.kind.value == "hard_capacity_up" and (it.available_hours and it.start_date):
+        ws = _week_start(it.start_date)
+        return {"target": "availability", "start_date": ws.isoformat(),
+                "end_date": (ws + datetime.timedelta(days=6)).isoformat(),
+                "hours": it.available_hours, "reason": it.reason or "extra availability"}
+    if it.kind.value == "hard_capacity_change":
+        start = _week_start(it.start_date) if it.start_date else _week_start(_S["as_of"])
+        wks = int(it.duration_weeks) if it.duration_weeks else 2
+        return {"target": "intensity_cap", "start_date": start.isoformat(),
+                "end_date": (start + datetime.timedelta(days=7 * max(wks, 1) - 1)).isoformat(),
+                "reason": it.reason or "keep it easy"}
+    return None
+
+
+def _candidate_plan(edit):
+    """Generate the plan that WOULD result from applying `edit`, without persisting anything."""
+    s = _S["season"]
+    events = plan_store.events_for(_S["conn"], s["id"])
+    unavail = plan_store.unavailable_for(_S["conn"], s["id"])
+    availability, intensity_caps = plan_store.active_modifiers(_S["conn"], s["id"])
+    if edit["target"] == "unavailable":
+        unavail = unavail + [edit]
+    elif edit["target"] == "availability":
+        availability = availability + [edit]
+    elif edit["target"] == "intensity_cap":
+        intensity_caps = intensity_caps + [edit]
+    return plan_gen.generate_plan(_S["m"], _S["profile"], s, events, unavail, _S["as_of"],
+                                  availability=availability, intensity_caps=intensity_caps)
+
+
+def _propose(text):
+    """Classify the message; build PENDING proposals (with diffs) for hard items, collect
+    clarifying questions for ambiguous ones. Applies nothing. Returns (proposals, questions)."""
+    s = _S.get("season")
+    plan = _S.get("plan")
+    if not s or not plan or "error" in plan:
+        return [], []
+    try:
+        accepted, _ = plan_diary.read_diary(text, _S["as_of"], plan["weeks"],
+                                            s["weekly_hours_budget"], _S["coach"].client,
+                                            _S["coach"].cfg.model)
+    except Exception:
+        return [], []
+    proposals, questions = [], []
+    for it in accepted:
+        if it.kind.value == "ambiguous":
+            questions.append(it.clarifying_question)
+            continue
+        edit = _edit_from_item(it)
+        if not edit:
+            continue
+        cand = _candidate_plan(edit)
+        if "error" in cand:
+            continue
+        _S["pending_seq"] += 1
+        pid = _S["pending_seq"]
+        _S["pending"][pid] = {"kind": it.kind.value, "summary": it.summary, "edit": edit}
+        proposals.append({"id": pid, "kind": it.kind.value, "summary": it.summary,
+                          "quote": it.quote, "edit": edit,
+                          "diff": plan_gen.diff_plans(plan, cand)})
+    return proposals, questions
+
+
 @app.post("/api/coach/message")
 def message(body: MessageIn):
     now = datetime.datetime.now().replace(microsecond=0).isoformat()
     cid = body.conversation_id or store.start_conversation(_S["conn"], _S["as_of"], now)
-    # 1. If the message changes a season input, apply it + recompute BEFORE replying, so the
-    #    coach explains the freshly-recomputed plan (it never edits numbers itself).
-    edit_note = _try_season_edit(body.text, now)
+    # 1. Diary-driven adjustment is PROPOSE-ONLY: classify the message and, for hard constraints
+    #    or opportunities, prepare a recompute the athlete must confirm (nothing applied here).
+    proposals, questions = _propose(body.text)
+    # 2. Only when the diary found no plan-relevant change do we fall back to the Slice 4 direct
+    #    commands ("move my race", "I'm down to 5 h/wk") which apply immediately + explain.
+    edit_note = None if proposals else _try_season_edit(body.text, now)
     out = _S["coach"].respond(body.text, cid, _S["as_of"], now)
     out["conversation_id"] = cid
     if edit_note:
         out["plan_recomputed"] = edit_note
+    if proposals:
+        out["plan_proposals"] = proposals
+    if questions:
+        out["clarifying_questions"] = questions
+    # 3. Recompute recurring-theme advisories now that this check-in's notes are stored, and
+    #    surface them (soft — they never changed the plan).
+    themes = _refresh_advisories()
+    if themes:
+        out["recurring_themes"] = themes
     return out
+
+
+@app.get("/api/coach/advisories")
+def advisories():
+    return {"recurring_themes": _compute_advisories()}
+
+
+class ConfirmIn(BaseModel):
+    proposal_id: int
+
+
+@app.post("/api/plan/adjustment/confirm")
+def confirm_adjustment(body: ConfirmIn):
+    """Apply a PENDING proposal the athlete confirmed: write the input, log it, recompute."""
+    p = _S["pending"].pop(body.proposal_id, None)
+    if not p:
+        raise HTTPException(404, "no such pending proposal (it may have expired)")
+    s, e, now = _S["season"], p["edit"], datetime.datetime.now().replace(microsecond=0).isoformat()
+    if e["target"] == "unavailable":
+        rid = plan_store.add_unavailable(_S["conn"], s["id"], e["start_date"], e["end_date"], now,
+                                         reason=e["reason"])
+        undo = {"table": "unavailable_period", "id": rid}
+    else:
+        kind = "availability" if e["target"] == "availability" else "intensity_cap"
+        rid = plan_store.add_modifier(_S["conn"], s["id"], kind, e["start_date"], e["end_date"],
+                                      now, hours=e.get("hours"), reason=e["reason"])
+        undo = {"table": "plan_modifier", "id": rid}
+    aid = plan_store.log_adjustment(_S["conn"], s["id"], p["kind"], p["summary"], e, undo, now)
+    _refresh_plan()
+    return {"applied": p["summary"], "adjustment_id": aid, "plan": _S["plan"]}
+
+
+@app.post("/api/plan/adjustment/{adjustment_id}/undo")
+def undo_adjustment(adjustment_id: int):
+    s = _S.get("season")
+    if not s:
+        raise HTTPException(400, "no active season")
+    if plan_store.undo_adjustment(_S["conn"], adjustment_id) is None:
+        raise HTTPException(404, "no such active adjustment")
+    _refresh_plan()
+    return {"undone": adjustment_id, "plan": _S["plan"]}
+
+
+@app.get("/api/plan/adjustments")
+def list_adjustments():
+    s = _S.get("season")
+    if not s:
+        return {"adjustments": []}
+    return {"adjustments": plan_store.adjustments_for(_S["conn"], s["id"])}
 
 
 # ---------------- annual calendar ----------------
