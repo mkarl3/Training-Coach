@@ -3,8 +3,8 @@ import React, { useEffect, useState } from "react";
 const LABELS = {
   name: "Name",
   birth_year: "Birth year",
-  weekly_hours_budget: "Weekly training hours available",
   units: "Units",
+  week_starts_on: "Week starts on",
 };
 
 export default function Profile({ onClose, onSaved }) {
@@ -72,6 +72,11 @@ export default function Profile({ onClose, onSaved }) {
                     <select value={form[f] ?? "imperial"} onChange={(e) => set(f, e.target.value)}>
                       <option value="imperial">imperial (mi / lb)</option>
                       <option value="metric">metric (km / kg)</option>
+                    </select>
+                  ) : f === "week_starts_on" ? (
+                    <select value={form[f] ?? "monday"} onChange={(e) => set(f, e.target.value)}>
+                      <option value="monday">Monday</option>
+                      <option value="sunday">Sunday</option>
                     </select>
                   ) : (
                     <input

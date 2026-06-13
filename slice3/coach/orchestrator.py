@@ -66,7 +66,7 @@ class Coach:
     """Wires retrieval + findings + notes + memory into per-turn LLM calls."""
 
     def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT,
-                 profile=None):
+                 profile=None, plan_summary=None):
         import anthropic
         from wko_metrics import DEFAULT_PROFILE
         self.conn = conn                      # coach.db (notes + conversations)
@@ -77,6 +77,9 @@ class Coach:
         self.cfg = cfg
         self.profile = profile or DEFAULT_PROFILE
         self.athlete_id = self.profile.athlete_id
+        # The deterministic calendar (slice4), as a plain text summary the coach EXPLAINS.
+        # The coach never computes these numbers — code does; this is read-only context.
+        self.plan_summary = plan_summary
 
     # ---- context assembly (the structural guarantee lives here) ----
     def _retrieve(self, question):
@@ -103,8 +106,8 @@ class Coach:
         age = p.age(year)
         if age is not None:
             facts.append(f"age: {age} ({'masters (>=40): lengthen recovery, shallower troughs' if p.is_masters(year) else 'open category'})")
-        if p.weekly_hours_budget is not None:
-            facts.append(f"weekly training time available: {p.weekly_hours_budget} h (time-crunched planning)")
+        # weekly availability is a season input (slice4), not a profile fact — added to the
+        # coach's context by the calendar layer when a season is active.
         return "  " + "\n  ".join(facts)
 
     def _build_turn_context(self, question, as_of, conv_id):
@@ -112,7 +115,10 @@ class Coach:
         meth = "\n\n".join(f"[{c['doc']} — relevance {c['score']:.2f}]\n{c['text']}"
                            for c in chunks) or "(nothing relevant retrieved — flag any general answer)"
         prior = store.prior_checkin_dates(self.conn, conv_id)
+        calendar = (f"CALENDAR (deterministic plan skeleton — explain it, do NOT recompute "
+                    f"these numbers yourself):\n{self.plan_summary}\n\n" if self.plan_summary else "")
         return (f"ATHLETE PROFILE (fixed facts):\n{self._profile_context(as_of)}\n\n"
+                f"{calendar}"
                 f"FINDINGS (deterministic, as of {as_of}):\n"
                 f"{_findings_context(self.watch_state, self.ranked_confirmed)}\n\n"
                 f"METHODOLOGY (retrieved for this question, corpus v{self.index.version}):\n{meth}\n\n"

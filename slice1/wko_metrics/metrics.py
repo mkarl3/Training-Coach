@@ -128,6 +128,37 @@ def demonstrated_sustainable_floor(ctl_daily, hold_weeks, window_weeks, as_of=Tr
     return floor_weekly.reindex(ctl_daily.index, method="ffill")
 
 
+def demonstrated_sustainable_ramp(weekly_ctl, floor_weekly, ramp_cap,
+                                  percentile=75.0, hold_weeks=3, giveback_frac=0.5):
+    """The DEMONSTRATED-SAFE weekly CTL ramp — what the athlete has absorbed AND KEPT, not
+    their historical max (which would encode the spike-then-crash pattern we're guarding).
+
+    Take positive week-over-week CTL gains during genuine building (CTL above half the best
+    demonstrated floor — skips near-zero detrained noise), KEEP only those that were sustained
+    (the gain wasn't given back beyond `giveback_frac` of it within the next `hold_weeks`), and
+    report the `percentile`th of those, capped at `ramp_cap`. None when history can't show one.
+    Pure: weekly CTL + weekly floor in, scalar (or None) out — hand-verifiable.
+    """
+    wk = weekly_ctl.dropna()
+    if wk.size < hold_weeks + 4:
+        return None
+    ctl, ramp, flo = wk.values, wk.diff().values, floor_weekly.reindex(wk.index).ffill().values
+    fmax = np.nanmax(flo) if flo.size else np.nan
+    gate = fmax * 0.5 if np.isfinite(fmax) else 0.0
+    safe = []
+    for i in range(1, len(wk)):
+        r = ramp[i]
+        if not np.isfinite(r) or r <= 0 or ctl[i] < gate:
+            continue
+        future = ctl[i + 1:i + 1 + hold_weeks]
+        if future.size and np.nanmin(future) < ctl[i] - giveback_frac * r:
+            continue                                       # gain given back -> not sustained
+        safe.append(r)
+    if not safe:
+        return None
+    return round(min(float(np.percentile(safe, percentile)), ramp_cap), 1)
+
+
 def trailing_zero_ride_streak(has_ride):
     """Per-day count of consecutive trailing has_ride==0 days (0 on a ride day).
     A gap is has_ride==0, NOT tss_sum==0 (a logged ride with missing TSS is not a gap)."""
@@ -272,6 +303,16 @@ class Metrics:
         return demonstrated_sustainable_floor(
             self.daily["ctl"].astype(float), self.profile.floor_hold_weeks,
             self._floor_window_weeks(), as_of=False)
+
+    def personal_sustainable_ramp(self, percentile=75.0, hold_weeks=3, giveback_frac=0.5):
+        """The athlete's DEMONSTRATED-SAFE weekly CTL ramp — what they've actually absorbed
+        and kept, not their historical max (which would bake in their spike-then-crash pattern).
+        Like the CTL floor, a retrospective trait read off full history. Capped by the profile's
+        ramp_rate_cap; None when history is too thin (caller falls back to a method default)."""
+        wk = self.weekly_ctl().dropna()
+        floor_wk = self.personal_ctl_floor().resample("W").last().reindex(wk.index).ffill()
+        return demonstrated_sustainable_ramp(
+            wk, floor_wk, self.profile.ramp_rate_cap, percentile, hold_weeks, giveback_frac)
 
     def tiz_power_distribution(self):
         return tiz_distribution(self.daily, POWER_ZONE_COLS, self.cfg.tiz_window_days)

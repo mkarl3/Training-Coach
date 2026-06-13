@@ -1,0 +1,268 @@
+"""Deterministic plan-skeleton generator (Slice 4, step 2 — the core).
+
+BASELINE STRUCTURE = the project's Periodization Matrix (Friel periods + WKO development
+sequencing), scaled to the weeks available. On top of that baseline, this athlete's failure
+modes (from the profile) act as guardrails and their real availability (from the season)
+binds the load. Pure + deterministic: same inputs -> same plan, every week traceable to the
+rule that set it.
+
+THE BOUNDARY: this is code. The LLM coach explains and triggers recompute; it never writes
+these numbers.
+
+Inputs are plain data (DB-agnostic, testable):
+  season: {"start_date","weekly_hours_budget"}
+  events / unavailable: lists of dicts
+Reads the Metrics facade for current/historical CTL + the demonstrated floor + actual TSS;
+the profile for the ramp cap, masters flag, and week-start preference.
+"""
+import datetime as dt
+
+import pandas as pd
+
+from .config import DEFAULT_CALENDAR
+
+
+def _week_start(d, week_starts_on="monday"):
+    """Align a date to the start of its week (Monday, or Sunday if the athlete prefers)."""
+    if week_starts_on == "sunday":
+        return d - dt.timedelta(days=(d.weekday() + 1) % 7)
+    return d - dt.timedelta(days=d.weekday())
+
+
+def _overlaps(ws, we, periods):
+    for p in periods:
+        ps = dt.date.fromisoformat(p["start_date"])
+        pe = dt.date.fromisoformat(p["end_date"])
+        if ws <= pe and ps <= we:
+            return p
+    return None
+
+
+def pick_a_race(events, today):
+    """The next A-priority event on/after today; fall back to the next event of any priority."""
+    fut = [e for e in events if dt.date.fromisoformat(e["event_date"]) >= today]
+    a = [e for e in fut if e["priority"] == "A"]
+    pool = a or fut
+    return min(pool, key=lambda e: e["event_date"]) if pool else None
+
+
+def fit_blocks(n_weeks, cfg):
+    """Scale the canonical matrix blocks to n_weeks, preserving the Friel sequence and the
+    matrix's base-heavy proportions. Returns a per-week list of (block, is_last_week_of_block)."""
+    race_w = cfg.race_weeks if n_weeks >= 3 else (1 if n_weeks >= 2 else 0)
+    peak_w = cfg.peak_weeks if (n_weeks - race_w) >= 8 else (1 if (n_weeks - race_w) >= 4 else 0)
+    R = max(0, n_weeks - race_w - peak_w)
+
+    bb = [b for b in cfg.canonical_blocks if b[1] in ("base", "build")]   # Prep .. Build 2
+    tot = sum(b[2] for b in bb)
+    raw = [b[2] * R / tot for b in bb] if tot else [0] * len(bb)
+    alloc = [int(x) for x in raw]
+    for i in sorted(range(len(bb)), key=lambda i: raw[i] - alloc[i], reverse=True)[: R - sum(alloc)]:
+        alloc[i] += 1
+
+    peak_block = next(b for b in cfg.canonical_blocks if b[1] == "peak")
+    race_block = next(b for b in cfg.canonical_blocks if b[1] == "taper")
+
+    seq = []
+    for b, a in zip(bb, alloc):
+        seq += [(b, k == a - 1) for k in range(a)]
+    seq += [(peak_block, k == peak_w - 1) for k in range(peak_w)]
+    seq += [(race_block, k == race_w - 1) for k in range(race_w)]
+    return seq[:n_weeks]
+
+
+def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CALENDAR):
+    """Return {"meta": {...}, "weeks": [...]} or {"error": ...}. The plan spans the whole
+    season (start -> A-race); weeks already elapsed carry ACTUAL TSS/CTL for planned-vs-actual."""
+    today = dt.date.fromisoformat(as_of)
+    wstart = profile.week_starts_on
+    a_race = pick_a_race(events, today)
+    if a_race is None:
+        return {"error": "no goal event on or after the current data date"}
+    a_date = dt.date.fromisoformat(a_race["event_date"])
+
+    plan_start = _week_start(dt.date.fromisoformat(season["start_date"]), wstart)
+    race_week = _week_start(a_date, wstart)
+    if race_week < plan_start:
+        return {"error": "A-race falls before the season start"}
+    weeks = []
+    w = plan_start
+    while w <= race_week:
+        weeks.append(w)
+        w += dt.timedelta(days=7)
+    N = len(weeks)
+    seq = fit_blocks(N, cfg)
+
+    # --- anchors (nothing re-derived): planned trajectory starts from CTL at season start ---
+    anchor_ctl = float(m.ctl.asof(pd.Timestamp(plan_start.isoformat())))
+    floor = float(m.personal_ctl_floor().iloc[-1])
+    target_peak_ctl = max(floor, anchor_ctl + 3.0)
+    masters = profile.is_masters(a_date.year)
+    ramp_cap = profile.ramp_rate_cap
+    budget_h = season["weekly_hours_budget"]
+    label, plan_if, distribution, long_priority = cfg.emphasis.get(
+        a_race["event_type"], cfg.default_emphasis)
+    if2 = plan_if * plan_if
+
+    # --- monotony guardrail: gate hard/easy separation on THIS athlete's gray-zone tendency ---
+    # The monotony fingerprint's distribution legs (detectors.py): time in the gray IF band and
+    # TiZ narrowing. We read them as-of the plan date against the SAME profile thresholds the
+    # detector uses, so the plan only tightens separation when this athlete actually trends
+    # gray-zone — not as a blanket prescription.
+    ts = pd.Timestamp(as_of)
+    gb = m.gray_zone_if_fraction().asof(ts)
+    tc = m.tiz_power_concentration().asof(ts)
+    gray_band = None if pd.isna(gb) else round(float(gb), 2)
+    tiz_conc = None if pd.isna(tc) else round(float(tc), 2)
+    band_cap, conc_cap = profile.monotony_band_frac, profile.tiz_concentration_watch
+    band_hot = gray_band is not None and gray_band >= band_cap
+    conc_hot = tiz_conc is not None and tiz_conc >= conc_cap
+    monotony_prone = band_hot or conc_hot
+    if monotony_prone:
+        why = []
+        if band_hot:
+            why.append(f"gray-band {gray_band:.0%}>={band_cap:.0%}")
+        if conc_hot:
+            why.append(f"TiZ concentration {tiz_conc}>={conc_cap}")
+        mono_note = ("monotony guardrail (" + ", ".join(why) + "): enforce hard/easy separation "
+                     "— easy days capped at Z2, quality concentrated; no gray-zone filler")
+        distribution = "STRICT polarized (monotony guard) — " + distribution
+    rec_every = cfg.rec_every_masters if masters else cfg.rec_every_open
+    trough = cfg.recovery_dip * (cfg.masters_trough_factor if masters else 1.0)
+    ramp_coef = 0.5 * 7 + cfg.pmc_decay_days                  # weekly_tss = 7*ctl + ramp_coef*ramp
+    daily = m.daily
+
+    # --- ramp magnitude from the athlete's DEMONSTRATED-SAFE ramp, not a generic number ---
+    # Anchor the base target to what this athlete has actually absorbed-and-kept; scale build
+    # down by the method's base:build ratio so the periodization shape (base > build) holds.
+    # Fall back to the config defaults when history can't demonstrate a sustainable ramp.
+    psr = m.personal_sustainable_ramp()
+    ramp_source = "history" if psr is not None else "default"
+    base_ramp = psr if psr is not None else cfg.ramp_base
+    build_ramp = (round(base_ramp * cfg.ramp_build / cfg.ramp_base, 1)
+                  if psr is not None else cfg.ramp_build)
+    family_ramp = {"base": base_ramp, "build": build_ramp, "peak": cfg.ramp_peak}
+
+    rows = []
+    ctl = anchor_ctl
+    bb_week = 0
+    for i, (mon, (block, is_last)) in enumerate(zip(weeks, seq)):
+        we = mon + dt.timedelta(days=6)
+        bname, family, _nom, focus, target_metric, advance_when = block
+        fired, rationale = [], [f"{bname} ({focus}) — nominal "]
+
+        # 1. ramp by block family (taper proportional)
+        if family == "taper":
+            ramp = -round(cfg.taper_frac * ctl, 1)
+            rationale[0] += f"taper -{cfg.taper_frac:.0%}/wk ({ramp:+.1f} CTL)"
+        else:
+            ramp = family_ramp[family]
+            src = (" (your demonstrated sustainable ramp)" if ramp_source == "history"
+                   and family in ("base", "build") else
+                   " (method default — history too thin)" if family in ("base", "build") else "")
+            rationale[0] += f"{ramp:+.1f} CTL/wk{src}"
+
+        # 2. recovery troughs (built-in recovery this athlete habitually skips)
+        is_recovery = False
+        if family in ("base", "build"):
+            bb_week += 1
+            if bb_week % rec_every == 0:
+                is_recovery, ramp = True, -trough
+                fired.append(f"recovery week (every {rec_every}{' masters' if masters else ''}, "
+                             f"trough {ramp:+.1f})")
+
+        # 3. ramp cap — spike-then-crash guardrail
+        if ramp > ramp_cap:
+            fired.append(f"ramp_cap {ramp:+.1f}->{ramp_cap:+.1f} CTL/wk")
+            ramp = ramp_cap
+        # 4. don't overshoot target during base/build
+        if family in ("base", "build") and ctl + ramp > target_peak_ctl:
+            ramp = max(0.0, target_peak_ctl - ctl)
+            fired.append(f"target reached (cap to {target_peak_ctl:.0f})")
+        # 5. known-unavailable -> forced recovery
+        ua = _overlaps(mon, we, unavailable)
+        if ua:
+            is_recovery, ramp = True, min(ramp, -trough)
+            fired.append(f"unavailable ({ua.get('reason') or 'blocked'}) -> recovery")
+
+        target = ctl + ramp
+        weekly_tss = 7 * ctl + ramp_coef * ramp
+        # 6. time-budget cap (availability from the season) — binds the achievable ramp
+        max_tss = budget_h * if2 * 100.0
+        if weekly_tss > max_tss and not ua:
+            new_ramp = (max_tss - 7 * ctl) / ramp_coef
+            if round(ramp, 1) - round(new_ramp, 1) >= 0.1:
+                fired.append(f"time_budget_cap {weekly_tss:.0f}->{max_tss:.0f} TSS "
+                             f"({budget_h:.1f} h @ IF {plan_if}) -> ramp {ramp:+.1f}->{new_ramp:+.1f}")
+            ramp, target, weekly_tss = new_ramp, ctl + new_ramp, max_tss
+
+        est_hours = weekly_tss / (if2 * 100.0)
+        long_ride = (cfg.long_ride_hours.get(family) if long_priority and family in ("base", "build", "peak")
+                     else None)
+        # 50% rule: no single ride above half the week's TSS (TrainerRoad dataset analysis)
+        weekly_tss_target = round(weekly_tss)
+        single_ride_cap = round(cfg.single_ride_cap_frac * weekly_tss_target)
+        # monotony guardrail fires on training weeks (where distribution is steerable)
+        if monotony_prone and not is_recovery and family != "taper":
+            fired.append(mono_note)
+
+        # --- planned vs actual: elapsed weeks carry actuals from the facade ---
+        status = "upcoming"
+        actual_tss = actual_ctl = None
+        if mon <= today:
+            status = "elapsed" if we <= today else "current"
+            seg = daily.loc[mon.isoformat():min(we, today).isoformat(), "tss_sum"].dropna()
+            actual_tss = round(float(seg.sum())) if len(seg) else 0
+            ac = m.ctl.asof(pd.Timestamp(min(we, today).isoformat()))
+            actual_ctl = None if pd.isna(ac) else round(float(ac), 1)
+
+        rows.append({
+            "week": i + 1, "week_start": mon.isoformat(), "week_end": we.isoformat(),
+            "block": bname, "family": family, "focus": focus,
+            "target_metric": target_metric, "advance_when": advance_when,
+            "field_test": bool(is_last and family != "taper"),
+            "is_recovery": bool(is_recovery),
+            "status": status,
+            "ctl_start": round(ctl, 1), "ctl_target": round(target, 1),
+            "planned_ramp": round(ramp, 1),
+            "weekly_tss_target": weekly_tss_target,
+            "single_ride_tss_cap": single_ride_cap,
+            "est_hours": round(est_hours, 1),
+            "actual_tss": actual_tss, "actual_ctl": actual_ctl,
+            "emphasis": label, "prescribed_distribution": distribution,
+            "long_ride_hours": long_ride,
+            "rationale": "; ".join(rationale),
+            "constraints_fired": fired,
+        })
+        ctl = target
+
+    peak_achieved = round(max((r["ctl_target"] for r in rows), default=anchor_ctl), 1)
+    block_weeks = {}
+    for r in rows:
+        block_weeks[r["block"]] = block_weeks.get(r["block"], 0) + 1
+    return {
+        "meta": {
+            "a_race": {"name": a_race["name"], "date": a_race["event_date"],
+                       "type": a_race["event_type"], "emphasis": label},
+            "plan_start": plan_start.isoformat(), "weeks": N,
+            "week_starts_on": wstart,
+            "anchor_ctl": round(anchor_ctl, 1),
+            "target_peak_ctl": round(target_peak_ctl, 1),
+            "peak_ctl_achieved": peak_achieved,
+            "target_reached": peak_achieved >= round(target_peak_ctl, 1) - 0.5,
+            "personal_floor": round(floor, 1),
+            "masters": masters, "ramp_cap": ramp_cap, "weekly_hours_budget": budget_h,
+            "sustainable_ramp": psr, "ramp_source": ramp_source,
+            "base_ramp": base_ramp, "build_ramp": build_ramp,
+            "block_weeks": block_weeks,
+            "family_weeks": {f: sum(1 for r in rows if r["family"] == f)
+                             for f in ("base", "build", "peak", "taper")},
+            "distribution_rx": distribution,
+            "monotony_guard": {
+                "prone": monotony_prone,
+                "gray_band_frac": gray_band, "gray_band_cap": band_cap,
+                "tiz_concentration": tiz_conc, "tiz_concentration_cap": conc_cap,
+            },
+        },
+        "weeks": rows,
+    }

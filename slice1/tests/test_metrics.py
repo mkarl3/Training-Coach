@@ -214,6 +214,31 @@ def test_floor_real_athlete_best_held_base(conn):
     assert float(asof.iloc[-1]) < float(retro.iloc[-1])
 
 
+def test_sustainable_ramp_excludes_the_crash_and_caps():
+    # Two +4/wk climbs: the first is HELD (sustained), the second CRASHES back (spike-then-
+    # crash). Only the sustained climb should count -> p75 of {4,4,4} = 4, then capped to 3.
+    wk = pd.date_range("2025-01-05", periods=14, freq="W")
+    ctl = pd.Series([20, 24, 28, 32, 32, 32, 32,      # climb +4*3 then HELD flat
+                     36, 40, 44, 20, 20, 20, 20],     # climb +4*3 then CRASH back to 20
+                    index=wk, dtype=float)
+    floor = pd.Series(40.0, index=wk)                  # gate = 20; all weeks qualify
+    # uncapped: the three sustained +4 gains survive; the crash climb's gains are dropped
+    assert metrics.demonstrated_sustainable_ramp(ctl, floor, ramp_cap=99, percentile=75) == 4.0
+    # the profile cap binds the result
+    assert metrics.demonstrated_sustainable_ramp(ctl, floor, ramp_cap=3.0, percentile=75) == 3.0
+    # thin history -> None (caller falls back to a method default)
+    assert metrics.demonstrated_sustainable_ramp(ctl.iloc[:4], floor.iloc[:4], 99) is None
+
+
+def test_sustainable_ramp_real_athlete(conn):
+    m = metrics.Metrics(conn)
+    psr = m.personal_sustainable_ramp()
+    assert psr is not None and 0 < psr <= m.profile.ramp_rate_cap
+    # demonstrated-safe, not historical max: well under the spike-crash ceiling, and monotonic
+    assert m.personal_sustainable_ramp(percentile=50) <= psr <= m.personal_sustainable_ramp(percentile=90)
+    assert m.personal_sustainable_ramp() == m.personal_sustainable_ramp()   # deterministic
+
+
 def test_projected_days_excluded_from_series(conn):
     m = metrics.Metrics(conn)
     # Daily index ends at the actual horizon; no 2026-08-01 projected row leaks in.

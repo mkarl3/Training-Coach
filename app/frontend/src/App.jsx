@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Watchman from "./Watchman.jsx";
 import Coach from "./Coach.jsx";
 import Profile from "./Profile.jsx";
+import Calendar from "./Calendar.jsx";
 
 export default function App() {
   const [meta, setMeta] = useState(null);
@@ -9,6 +10,7 @@ export default function App() {
   const [upload, setUpload] = useState({ state: "idle", msg: "" });
   const [dataKey, setDataKey] = useState(0); // bump to remount dashboard/coach after a refresh
   const [showProfile, setShowProfile] = useState(false);
+  const [view, setView] = useState("dashboard");  // "dashboard" | "calendar"
   const fileRef = useRef(null);
 
   async function refreshAfterProfile() {
@@ -64,6 +66,10 @@ export default function App() {
         <h1>
           Training Coach <small>data through {meta.date_max}</small>
         </h1>
+        <div className="tabs">
+          <button className={view === "dashboard" ? "tab on" : "tab"} onClick={() => setView("dashboard")}>Dashboard</button>
+          <button className={view === "calendar" ? "tab on" : "tab"} onClick={() => setView("calendar")}>Calendar</button>
+        </div>
         <div className="appbar-actions">
           {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
           <input type="file" accept=".xlsx" ref={fileRef} onChange={onFile}
@@ -79,7 +85,9 @@ export default function App() {
       {showProfile && <Profile onClose={() => setShowProfile(false)} onSaved={refreshAfterProfile} />}
       <div className="cols">
         <div className="left">
-          <Watchman key={"w" + dataKey} meta={meta} />
+          {view === "dashboard"
+            ? <Watchman key={"w" + dataKey} meta={meta} />
+            : <Calendar key={"cal" + dataKey} />}
         </div>
         <div className="right">
           <Coach key={"c" + dataKey} meta={meta} />
