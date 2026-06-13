@@ -21,7 +21,7 @@ ROOT = os.path.dirname(APP_DIR)
 for p in ("slice3", "slice2", "slice1", "slice0"):
     sys.path.insert(0, os.path.join(ROOT, p))
 
-from wko_metrics import metrics, detectors            # noqa: E402
+from wko_metrics import metrics, detectors, profile, AthleteProfile, DEFAULT_PROFILE  # noqa: E402
 from watchman import select, DEFAULT_SELECTION         # noqa: E402
 from wko_ingest import loader, validator               # noqa: E402
 from coach import store                                # noqa: E402
@@ -40,9 +40,13 @@ _S = {}
 
 
 def _load_training_data():
-    """(Re)build the in-memory dashboard + coach from the current wko.db. The coach.db
-    connection (conversation history) is opened once and reused across refreshes."""
-    m = metrics.Metrics(sqlite3.connect(WKO_DB, check_same_thread=False))
+    """(Re)build the in-memory dashboard + coach from the current wko.db, using the loaded
+    AthleteProfile for all athlete-relative constants. The coach.db connection (conversation
+    history + the profile row) is opened once and reused across refreshes."""
+    conn = _S.get("conn") or store.connect(COACH_DB)
+    prof = _S.get("profile") or profile.load_profile(conn)
+
+    m = metrics.Metrics(sqlite3.connect(WKO_DB, check_same_thread=False), profile=prof)
     findings = detectors.run_all(m)
     as_of = m.daily.index.max().strftime("%Y-%m-%d")
     watch_now = select(findings, as_of, m)
@@ -53,10 +57,9 @@ def _load_training_data():
     ranked = detectors.action_rank(
         [f for f in findings if f["severity"] == "confirmed" and f["window_end"] >= cutoff])
 
-    conn = _S.get("conn") or store.connect(COACH_DB)
     _S.update(
-        m=m, findings=findings, as_of=as_of, status=watch_now["status"], conn=conn,
-        coach=Coach(conn, coach_state, ranked, MethodologyIndex(INDEX_DB)),
+        m=m, findings=findings, as_of=as_of, status=watch_now["status"], conn=conn, profile=prof,
+        coach=Coach(conn, coach_state, ranked, MethodologyIndex(INDEX_DB), profile=prof),
         date_min=m.daily.index.min().strftime("%Y-%m-%d"),
     )
 
@@ -155,6 +158,54 @@ async def upload(file: UploadFile):
     _load_training_data()
     return {"ok": True, "filename": name, "sheets": sheets,
             "data_through": _S["as_of"], "board_status": _S["status"]}
+
+
+# ---------------- athlete profile ----------------
+_INT_FIELDS = {"birth_year", "floor_hold_weeks", "floor_window_months"}
+_STR_FIELDS = {"name", "units"}
+_NULLABLE = {"birth_year", "weekly_hours_budget"}
+
+
+def _coerce(field, value):
+    """Coerce an incoming JSON value to the profile field's type; '' / None -> None for
+    nullable fixed facts, else fall back to the default."""
+    if value is None or value == "":
+        return None if field in _NULLABLE else getattr(DEFAULT_PROFILE, field)
+    if field in _STR_FIELDS:
+        return str(value)
+    if field in _INT_FIELDS:
+        return int(value)
+    return float(value)
+
+
+@app.get("/api/profile")
+def get_profile():
+    p = _S["profile"]
+    year = int(_S["as_of"][:4])
+    return {
+        "profile": dataclasses.asdict(p),
+        "fixed_fact_fields": list(AthleteProfile.FIXED_FACT_FIELDS),
+        "tuned_fields": list(AthleteProfile.TUNED_FIELDS),
+        "derived": {"age": p.age(year), "is_masters": p.is_masters(year)},
+    }
+
+
+class ProfileIn(BaseModel):
+    updates: dict
+
+
+@app.post("/api/profile")
+def update_profile(body: ProfileIn):
+    valid = {f.name for f in dataclasses.fields(AthleteProfile)} - {"athlete_id"}
+    merged = dataclasses.asdict(_S["profile"])
+    for k, v in body.updates.items():
+        if k in valid:
+            merged[k] = _coerce(k, v)
+    new_profile = AthleteProfile(**merged)
+    profile.save_profile(_S["conn"], new_profile)
+    _S["profile"] = new_profile
+    _load_training_data()                            # athlete-relative constants changed -> recompute
+    return {"ok": True, "board_status": _S["status"], "data_through": _S["as_of"]}
 
 
 @app.get("/api/health")

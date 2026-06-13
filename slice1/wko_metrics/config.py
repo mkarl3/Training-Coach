@@ -51,13 +51,10 @@ class MetricsConfig:
     tiz_power_zones: tuple = field(default_factory=lambda: (1, 2, 3, 4, 5, 6))
     tiz_hr_zones: tuple = field(default_factory=lambda: (1, 2, 3, 4, 5))
 
-    # --- Personal CTL floor: DYNAMIC, history-derived (def. A, "demonstrated
-    # sustainable base"). The highest weekly-mean CTL the athlete held for
-    # >= floor_hold_weeks consecutive weeks within the trailing window. Rises as
-    # they build; does not collapse during a gap (the held block lingers in-window).
-    # ATHLETE-RELATIVE + UNVALIDATED (derived from one athlete's history).
-    floor_hold_weeks: int = 8          # the "8-week hold" — weeks a base must persist
-    floor_window_months: int = 18      # trailing window so an ancient peak doesn't anchor forever
+    # --- Personal CTL floor (DYNAMIC, "demonstrated sustainable base") ---
+    # The two athlete-relative knobs that DEFINE the floor — floor_hold_weeks and
+    # floor_window_months — now live on the AthleteProfile (profile.py), not here.
+    # Only the universal data-sufficiency gate stays:
     ctl_percentile_min_days: int = 60  # min history before an as-of CTL percentile is emitted
 
 
@@ -66,8 +63,10 @@ DEFAULT = MetricsConfig()
 
 @dataclass(frozen=True)
 class DetectorConfig:
-    """Detector thresholds. Tag: (ABS)=absolute/methodological, (REL)=athlete-relative-
-    percentile, (PLAN)=needs season plan (deferred this slice). All UNVALIDATED on n=1."""
+    """UNIVERSAL detector thresholds only — methodological/absolute (ABS) values and
+    structural maps. The athlete-relative (REL) thresholds were relocated to the
+    AthleteProfile (profile.py) in Slice 3.5; detectors read those from `m.profile`.
+    (PLAN)=needs season plan (deferred)."""
 
     # ACTION priority (1=highest). NOT diagnosis rank. safety/acute -> overtraining ->
     # trajectory (gap/under_load/monotony) -> standing gauge.
@@ -91,56 +90,40 @@ class DetectorConfig:
         ("monotony", "retrospective"): "trend",
     })
 
-    # 1 gap_unravel
+    # 1 gap_unravel   (REL -> profile: gap_confirmed_ctl_drop, genuine_peak_margin,
+    #                  gap_fitness_percentile)
     gap_watch_days: int = 3                  # (ABS) zero-ride streak -> watch
     gap_confirmed_days: int = 7              # (ABS) -> confirmed
-    gap_confirmed_ctl_drop: float = 3.0      # (REL) confirmed also needs CTL drop > X over the gap
     gap_active_prior_days: int = 14          # (ABS) "after a period above floor" = thread-alive window
     gap_active_min_ride_days: int = 4        # (ABS) >= this many ride days in prior window
     fwf_window_weeks: int = 4                # (ABS) fresh-while-fading window
     fwf_ctl_decline: float = 3.0             # (ABS) CTL falls >= this across window
     fwf_tsb_positive: float = 0.0            # (ABS) window-end TSB into positive territory
     floor_sustain_weeks: int = 8             # (ABS) never_sustained: held base < this
-    genuine_peak_margin: float = 3.0         # (REL) under_load separation margin around floor
-    # Dynamic per-athlete FITNESS gate (replaces fixed/thread-alive gating): a gap only
-    # counts as a build-and-crash if a real build preceded it — recent peak CTL reached the
-    # athlete's own Pxx percentile. P80 (≈ "clearly above your normal range") cleanly fires
-    # the late-Feb-2026 build-crash while skipping ordinary rest-week dips. (REL) self-scaling.
-    gap_fitness_percentile: float = 80.0
     gap_recent_peak_window_days: int = 56    # (ABS) trailing window for "recently built"
 
-    # 2 under_load
+    # 2 under_load   (REL -> profile: underload_below_floor_frac, underload_ramp_watch)
     underload_window_weeks: int = 8          # (ABS) flat-low persistence
-    underload_below_floor_frac: float = 0.8  # (REL) fraction of window with CTL below floor
     underload_peak_lookback_weeks: int = 16  # (ABS) trailing span for "no peak to fall from"
     underload_target_date: str = None        # (PLAN) ramp-to-floor-by-date; None -> deferred
-    underload_ramp_watch: float = 1.0        # (REL) trailing ramp below this (pts/wk) = stalling
 
-    # 3 overtraining (negative-test only this slice)
-    ot_tsb_percentile: float = 10.0          # (REL) athlete-relative deep-negative TSB cutoff
+    # 3 overtraining   (REL -> profile: ot_tsb_percentile)
     ot_k_days: int = 14                       # (ABS) TSB below cutoff for K days
     ot_atl_over_ctl_weeks: int = 8           # (ABS) ATL>CTL sustained (retrospective)
     ot_monotony_rising_slope: float = 0.0    # (ABS) rising monotony (early-warning precursor)
 
-    # 4 fragile_ftp (gauge)
-    fragile_gap_watch_w: float = 30.0        # (REL) 1h-2h power gap
-    fragile_gap_confirmed_w: float = 50.0    # (REL)
+    # 4 fragile_ftp   (REL -> profile: fragile_gap_watch_w, fragile_gap_confirmed_w)
     fragile_decoupling_pct: float = 5.0      # (ABS) long-ride Pw:Hr decoupling
     fragile_window_days: int = 120           # (ABS) gauge trend window for "is it moving"
 
-    # 5 injury_spike
+    # 5 injury_spike   (REL -> profile: acwr_min_acute_load, acwr_min_chronic_load)
     acwr_watch: float = 1.3                  # (ABS) EWMA ACWR
     acwr_confirmed: float = 1.5              # (ABS)
-    acwr_min_acute_load: float = 30.0        # (REL) absolute acute-EWMA gate
-    acwr_min_chronic_load: float = 20.0      # (REL) chronic-EWMA gate: a spike off a near-zero
-                                             # base isn't a meaningful absolute overload
     injury_stop_lookahead_days: int = 21     # (ABS) retrospective: stop within 1-3 wks
 
-    # 6 monotony
+    # 6 monotony   (REL -> profile: monotony_band_frac, tiz_concentration_watch)
     monotony_watch: float = 1.5              # (ABS) Foster monotony
     monotony_confirmed: float = 2.0          # (ABS)
-    monotony_band_frac: float = 0.6          # (REL) fraction of workouts in IF gray band
-    tiz_concentration_watch: float = 0.45    # (REL) HHI of zone shares (narrowing)
 
     # Reset / exit conditions (consumed by Slice-2 watchman; DEFINED here per detector).
     # Each: the metric + comparison that CLEARS an open finding. metric names map to

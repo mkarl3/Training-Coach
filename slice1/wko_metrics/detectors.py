@@ -84,7 +84,7 @@ def detect_gap_unravel(m, dcfg=DETECTORS):
     # Dynamic per-athlete fitness gate: the gap only counts as a build-and-crash if a real
     # build preceded it — recent peak CTL reached the athlete's own Pxx percentile (as-of,
     # no lookahead). This replaces the thread-alive gate that fired on every rest week.
-    fit_thr = m.ctl_percentile_threshold(dcfg.gap_fitness_percentile, as_of=True)
+    fit_thr = m.ctl_percentile_threshold(m.profile.gap_fitness_percentile, as_of=True)
     recent_peak = m.recent_peak_ctl(dcfg.gap_recent_peak_window_days)
 
     # ---- early_warning: streak-break tripwire (no lookahead) ----
@@ -112,11 +112,11 @@ def detect_gap_unravel(m, dcfg=DETECTORS):
               "ctl_drop": _round(drop), "tsb_now": _round(tsb.iloc[i])}
         disc = {
             "built_to_personal_high": _t(True, _round(peak),
-                                         {"pct": dcfg.gap_fitness_percentile, "value": _round(thr)}),
+                                         {"pct": m.profile.gap_fitness_percentile, "value": _round(thr)}),
         }
-        if n >= dcfg.gap_confirmed_days and drop > dcfg.gap_confirmed_ctl_drop and armed_conf:
+        if n >= dcfg.gap_confirmed_days and drop > m.profile.gap_confirmed_ctl_drop and armed_conf:
             disc["zero_ride_streak"] = _t(True, n, dcfg.gap_confirmed_days)
-            disc["ctl_dropped"] = _t(True, _round(drop), dcfg.gap_confirmed_ctl_drop)
+            disc["ctl_dropped"] = _t(True, _round(drop), m.profile.gap_confirmed_ctl_drop)
             out.append(b.make("gap_unravel", "early_warning", "confirmed",
                               idx[start_i], idx[i], ev, disc))
             armed_conf = armed_watch = False
@@ -129,7 +129,7 @@ def detect_gap_unravel(m, dcfg=DETECTORS):
     # ---- retrospective: fresh-while-fading + never-sustained + genuine prior peak ----
     wk_ctl = m.weekly_ctl()
     wk_tsb = tsb.resample("W").mean()
-    fit_thr_retro = m.ctl_percentile_threshold(dcfg.gap_fitness_percentile, as_of=False)
+    fit_thr_retro = m.ctl_percentile_threshold(m.profile.gap_fitness_percentile, as_of=False)
     weeks_above = m.consecutive_weeks_above_floor(as_of=True)
     prior_peak = m.prior_peak_ctl()
     W = dcfg.fwf_window_weeks
@@ -193,8 +193,8 @@ def detect_under_load(m, dcfg=DETECTORS):
         peak_recent = float(wk_ctl.iloc[look0:j].max())
         # margin keeps under_load and gap_unravel separable: a peak within `margin` of the
         # floor counts as a build (gap territory), not never-built.
-        no_peak = peak_recent < (fl - dcfg.genuine_peak_margin)
-        flat_low = below_frac >= dcfg.underload_below_floor_frac
+        no_peak = peak_recent < (fl - m.profile.genuine_peak_margin)
+        flat_low = below_frac >= m.profile.underload_below_floor_frac
         if not (flat_low and no_peak) or j in fired:
             continue
         start_w, end_w = wk_ctl.index[j - Wn], wk_ctl.index[j - 1]
@@ -203,10 +203,10 @@ def detect_under_load(m, dcfg=DETECTORS):
         if dcfg.underload_target_date is None:
             ramp_test = {"passed": False, "value": _round(ramp_now), "threshold": "deferred (no season plan)"}
         else:
-            ramp_test = _t(ramp_now < dcfg.underload_ramp_watch, _round(ramp_now), dcfg.underload_ramp_watch)
+            ramp_test = _t(ramp_now < m.profile.underload_ramp_watch, _round(ramp_now), m.profile.underload_ramp_watch)
         disc = {
             "no_peak_to_fall_from": _t(no_peak, _round(peak_recent), _round(fl)),
-            "chronically_below_floor": _t(flat_low, _round(below_frac), dcfg.underload_below_floor_frac),
+            "chronically_below_floor": _t(flat_low, _round(below_frac), m.profile.underload_below_floor_frac),
             "ramp_to_floor_by_target": ramp_test,
         }
         sev = "confirmed" if below_frac >= 0.95 else "watch"
@@ -228,7 +228,7 @@ def detect_overtraining(m, dcfg=DETECTORS):
     mono = m.monotony()
     mftp = m.mftp
     ramp = m.ramp_rate()
-    tsb_cut = m.tsb_percentile(dcfg.ot_tsb_percentile)
+    tsb_cut = m.tsb_percentile(m.profile.ot_tsb_percentile)
 
     # ---- retrospective: ATL>CTL sustained + TSB deeply negative + performance declining ----
     over = (atl > ctl).astype(int)
@@ -302,12 +302,12 @@ def detect_fragile_ftp(m, dcfg=DETECTORS):
     pdr = pdr[pdr["sufficient"]]
     for _, r in pdr.iterrows():
         gap = float(r["pd_gap_1h_2h_w"])
-        if gap < dcfg.fragile_gap_watch_w:
+        if gap < m.profile.fragile_gap_watch_w:
             continue
         d = r["date"]
         disc = {"power_duration_gap_1h_2h": _t(True, _round(gap),
-                {"watch": dcfg.fragile_gap_watch_w, "confirmed": dcfg.fragile_gap_confirmed_w})}
-        sev = "confirmed" if gap >= dcfg.fragile_gap_confirmed_w else "watch"
+                {"watch": m.profile.fragile_gap_watch_w, "confirmed": m.profile.fragile_gap_confirmed_w})}
+        sev = "confirmed" if gap >= m.profile.fragile_gap_confirmed_w else "watch"
         ev = {"leg": "power_duration", "gap_1h_2h_w": _round(gap),
               "p1hr_w": _round(r["p1hr_w"]), "p2hr_w": _round(r["p2hr_w"])}
         out.append(b.make("fragile_ftp", "retrospective", sev, d, d, ev, disc))
@@ -337,7 +337,7 @@ def detect_injury_spike(m, dcfg=DETECTORS):
             continue
         ac = float(acute.iloc[i])
         ch = float(chronic.iloc[i])
-        if ac < dcfg.acwr_min_acute_load or ch < dcfg.acwr_min_chronic_load:  # absolute-load gates
+        if ac < m.profile.acwr_min_acute_load or ch < m.profile.acwr_min_chronic_load:  # absolute-load gates
             continue
         if cur >= dcfg.acwr_confirmed and armed_conf:
             thr, sev = dcfg.acwr_confirmed, "confirmed"
@@ -349,7 +349,7 @@ def detect_injury_spike(m, dcfg=DETECTORS):
             continue
         disc = {
             "acwr_crossing": _t(True, _round(cur), thr),
-            "acute_load_gate": _t(True, _round(ac), dcfg.acwr_min_acute_load),
+            "acute_load_gate": _t(True, _round(ac), m.profile.acwr_min_acute_load),
         }
         ev = {"acwr": _round(cur), "acute_ewma": _round(ac)}
         out.append(b.make("injury_spike", "early_warning", sev, idx[i], idx[i], ev, dict(disc)))
@@ -388,10 +388,10 @@ def detect_monotony(m, dcfg=DETECTORS):
             cc = float(conc.iloc[i]) if not pd.isna(conc.iloc[i]) else None
             disc = {
                 "foster_monotony": _t(True, _round(cur), thr),
-                "if_gray_band_fraction": _t(bf is not None and bf >= dcfg.monotony_band_frac,
-                                            _round(bf), dcfg.monotony_band_frac),
-                "tiz_narrowing": _t(cc is not None and cc >= dcfg.tiz_concentration_watch,
-                                    _round(cc), dcfg.tiz_concentration_watch),
+                "if_gray_band_fraction": _t(bf is not None and bf >= m.profile.monotony_band_frac,
+                                            _round(bf), m.profile.monotony_band_frac),
+                "tiz_narrowing": _t(cc is not None and cc >= m.profile.tiz_concentration_watch,
+                                    _round(cc), m.profile.tiz_concentration_watch),
             }
             ev = {"monotony": _round(cur), "if_band_fraction": _round(bf), "tiz_concentration": _round(cc)}
             out.append(b.make("monotony", "early_warning", sev, idx[i], idx[i], ev, disc))

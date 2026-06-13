@@ -1,13 +1,22 @@
 import React, { useEffect, useRef, useState } from "react";
 import Watchman from "./Watchman.jsx";
 import Coach from "./Coach.jsx";
+import Profile from "./Profile.jsx";
 
 export default function App() {
   const [meta, setMeta] = useState(null);
   const [err, setErr] = useState(null);
   const [upload, setUpload] = useState({ state: "idle", msg: "" });
   const [dataKey, setDataKey] = useState(0); // bump to remount dashboard/coach after a refresh
+  const [showProfile, setShowProfile] = useState(false);
   const fileRef = useRef(null);
+
+  async function refreshAfterProfile() {
+    const mt = await fetch(`/api/meta`).then((r) => r.json());
+    setMeta(mt);
+    setDataKey((k) => k + 1);
+    setShowProfile(false);
+  }
 
   useEffect(() => {
     fetch(`/api/meta`).then((r) => r.json()).then(setMeta).catch((e) => setErr(String(e)));
@@ -59,6 +68,7 @@ export default function App() {
           {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
           <input type="file" accept=".xlsx" ref={fileRef} onChange={onFile}
             style={{ display: "none" }} />
+          <button className="update-btn" onClick={() => setShowProfile(true)}>⚙ Profile</button>
           <button className="update-btn" disabled={upload.state === "busy"}
             onClick={() => fileRef.current?.click()}>
             {upload.state === "busy" ? "Updating…" : "↑ Update training data"}
@@ -66,6 +76,7 @@ export default function App() {
           <span className={"pill " + meta.board_status}>{meta.board_status}</span>
         </div>
       </div>
+      {showProfile && <Profile onClose={() => setShowProfile(false)} onSaved={refreshAfterProfile} />}
       <div className="cols">
         <div className="left">
           <Watchman key={"w" + dataKey} meta={meta} />

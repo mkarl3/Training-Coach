@@ -65,14 +65,18 @@ def _findings_context(watch_state, ranked_confirmed):
 class Coach:
     """Wires retrieval + findings + notes + memory into per-turn LLM calls."""
 
-    def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT):
+    def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT,
+                 profile=None):
         import anthropic
+        from wko_metrics import DEFAULT_PROFILE
         self.conn = conn                      # coach.db (notes + conversations)
         self.watch_state = watch_state        # slice2 select() output for "now"
         self.ranked_confirmed = ranked_confirmed
         self.index = index                    # MethodologyIndex
         self.client = client or anthropic.Anthropic()
         self.cfg = cfg
+        self.profile = profile or DEFAULT_PROFILE
+        self.athlete_id = self.profile.athlete_id
 
     # ---- context assembly (the structural guarantee lives here) ----
     def _retrieve(self, question):
@@ -86,16 +90,30 @@ class Coach:
 
     def _notes_context(self, as_of):
         start = (datetime.date.fromisoformat(as_of) - datetime.timedelta(days=60)).isoformat()
-        rows = capture.notes_for_window(self.conn, start, as_of)
+        rows = capture.notes_for_window(self.conn, start, as_of, self.athlete_id)
         return "\n".join(f"  {d} [{cat}] {note} (said: \"{q}\")" for d, cat, note, q in rows) \
             or "  (none yet)"
+
+    def _profile_context(self, as_of):
+        """KNOWN fixed facts only — never invented. Empty until the athlete fills them in,
+        so behavior is unchanged for an unconfigured profile. Carries the doc's masters rule."""
+        p = self.profile
+        year = int(as_of[:4])
+        facts = [f"name: {p.name}"]
+        age = p.age(year)
+        if age is not None:
+            facts.append(f"age: {age} ({'masters (>=40): lengthen recovery, shallower troughs' if p.is_masters(year) else 'open category'})")
+        if p.weekly_hours_budget is not None:
+            facts.append(f"weekly training time available: {p.weekly_hours_budget} h (time-crunched planning)")
+        return "  " + "\n  ".join(facts)
 
     def _build_turn_context(self, question, as_of, conv_id):
         chunks = self._retrieve(question)
         meth = "\n\n".join(f"[{c['doc']} — relevance {c['score']:.2f}]\n{c['text']}"
                            for c in chunks) or "(nothing relevant retrieved — flag any general answer)"
         prior = store.prior_checkin_dates(self.conn, conv_id)
-        return (f"FINDINGS (deterministic, as of {as_of}):\n"
+        return (f"ATHLETE PROFILE (fixed facts):\n{self._profile_context(as_of)}\n\n"
+                f"FINDINGS (deterministic, as of {as_of}):\n"
                 f"{_findings_context(self.watch_state, self.ranked_confirmed)}\n\n"
                 f"METHODOLOGY (retrieved for this question, corpus v{self.index.version}):\n{meth}\n\n"
                 f"NOTES (athlete's dated subjective reports, last 60 days):\n"
@@ -106,7 +124,7 @@ class Coach:
     def respond(self, user_text, conv_id, as_of, now_iso):
         # 1. CAPTURE: store what the athlete said as dated notes (validated; no metrics).
         accepted, rejected = capture.extract_notes(user_text, as_of, self.client, self.cfg)
-        capture.store_checkin(self.conn, as_of, accepted, now_iso)
+        capture.store_checkin(self.conn, as_of, accepted, now_iso, self.athlete_id)
 
         # 2. Persist the user message; build history AFTER so the model sees it last.
         store.add_message(self.conn, conv_id, "user", user_text, now_iso)

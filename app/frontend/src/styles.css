@@ -34,6 +34,40 @@ body { margin: 0; background: var(--bg); color: var(--ink);
 .upload-msg.ok { color: var(--green); }
 .upload-msg.err { color: var(--red); }
 
+/* ---- profile modal ---- */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(35,38,43,0.38);
+  display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal { background: var(--bg); border: 1px solid var(--line); border-radius: 14px;
+  width: min(680px, 94vw); max-height: 88vh; display: flex; flex-direction: column;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.22); }
+.modal-head { display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.modal-head b { font-size: 16px; }
+.modal-head .x { background: none; border: none; font-size: 22px; line-height: 1;
+  color: var(--muted); cursor: pointer; padding: 0 4px; }
+.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-body h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+  color: var(--muted); margin: 18px 0 10px; font-weight: 700; }
+.modal-body h3:first-child { margin-top: 0; }
+.modal-body h3.advanced { color: var(--amber); display: flex; gap: 10px; align-items: baseline; }
+.modal-body h3.advanced span { text-transform: none; letter-spacing: 0; font-weight: 600; font-size: 11px; }
+.hint { color: var(--muted); font-size: 12.5px; margin: 6px 0 4px; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 16px; }
+.grid label { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
+.grid label span { color: var(--muted); font-size: 11.5px; }
+.grid label.tuned span { font-family: ui-monospace, Menlo, monospace; font-size: 11px; }
+.grid input, .grid select { border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px;
+  font: inherit; font-size: 13px; background: #fff; color: var(--ink); }
+.grid input:focus, .grid select:focus { outline: 2px solid #cfd9d4; }
+.modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 13px 18px;
+  border-top: 1px solid var(--line); }
+.modal-foot button { border-radius: 8px; padding: 7px 16px; font: inherit; font-weight: 600;
+  font-size: 13px; cursor: pointer; }
+.modal-foot .ghost { background: var(--panel); border: 1px solid var(--line); color: var(--ink); }
+.modal-foot .primary { background: var(--accent); border: none; color: #f6f5f0; }
+.modal-foot button:disabled { opacity: 0.55; cursor: default; }
+.modal-body.err { color: var(--red); }
+
 .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 7fr) minmax(360px, 5fr);
   gap: 20px; padding: 16px 0 18px; }
 .left { overflow-y: auto; min-height: 0; padding-right: 4px; }

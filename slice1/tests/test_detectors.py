@@ -111,7 +111,7 @@ def test_gap_fitness_gate_fires_on_build_crash_not_ordinary_dips(m):
 def test_gap_fitness_threshold_is_dynamic_and_self_scaling(m):
     # Not a hardcoded number: it's the athlete's own CTL percentile, and the as-of form
     # has no lookahead (it only rises/adapts from history-to-date).
-    thr = m.ctl_percentile_threshold(DETECTORS.gap_fitness_percentile, as_of=True)
+    thr = m.ctl_percentile_threshold(m.profile.gap_fitness_percentile, as_of=True)  # now on the profile
     feb = float(thr.loc["2026-02-24"])
     assert 34 <= feb <= 38                      # ~36 for this athlete, between dips and the build
     # dynamic, not a constant: the as-of percentile adapts as history accrues...

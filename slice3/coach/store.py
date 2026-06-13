@@ -8,6 +8,7 @@ import sqlite3
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversation (
     id          INTEGER PRIMARY KEY,
+    athlete_id  INTEGER NOT NULL DEFAULT 1,   -- scopes the conversation to an athlete
     started_at  TEXT NOT NULL,
     as_of       TEXT NOT NULL             -- the training-data date this conversation anchors to
 );
@@ -22,21 +23,32 @@ CREATE INDEX IF NOT EXISTS idx_message_conv ON message(conv_id);
 """
 
 
+def ensure_column(conn, table, col, decl):
+    """Idempotent migration — add a column to an existing table if it's missing
+    (backfills the DEFAULT for rows created before the column existed)."""
+    cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+    if col not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+
+
 def connect(db_path):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.executescript(SCHEMA)
+    ensure_column(conn, "conversation", "athlete_id", "INTEGER NOT NULL DEFAULT 1")
+    conn.commit()
     return conn
 
 
-def start_conversation(conn, as_of, started_at):
-    cur = conn.execute("INSERT INTO conversation (started_at, as_of) VALUES (?, ?)",
-                       (started_at, as_of))
+def start_conversation(conn, as_of, started_at, athlete_id=1):
+    cur = conn.execute("INSERT INTO conversation (athlete_id, started_at, as_of) VALUES (?,?,?)",
+                       (athlete_id, started_at, as_of))
     conn.commit()
     return cur.lastrowid
 
 
-def latest_conversation(conn):
-    row = conn.execute("SELECT id, as_of FROM conversation ORDER BY id DESC LIMIT 1").fetchone()
+def latest_conversation(conn, athlete_id=1):
+    row = conn.execute("SELECT id, as_of FROM conversation WHERE athlete_id=? "
+                       "ORDER BY id DESC LIMIT 1", (athlete_id,)).fetchone()
     return row  # (id, as_of) or None
 
 

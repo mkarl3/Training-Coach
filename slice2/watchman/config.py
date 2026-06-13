@@ -17,9 +17,8 @@ class SelectionConfig:
     trajectory_window_days: int = 90
     # How far back to look for the latest durability-gauge readout (a standing dial, not an alert).
     gauge_lookback_days: int = 240
-    # CTL below this percentile of the athlete's own history => quiet "below normal range" context
-    # (stopgap for the deferred multi-year detraining-drift mode; informational, not an alarm).
-    detraining_pctile: float = 25.0
+    # NOTE: detraining_pctile (the athlete-relative "below normal range" CTL percentile) was
+    # relocated to the AthleteProfile in Slice 3.5; the watchman reads it from m.profile.
 
 
 DEFAULT_SELECTION = SelectionConfig()

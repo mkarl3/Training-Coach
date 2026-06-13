@@ -220,8 +220,10 @@ def load_workouts(conn):
 # Facade — the single point where config meets the pure functions
 # ----------------------------------------------------------------------------- #
 class Metrics:
-    def __init__(self, conn, config: MetricsConfig = DEFAULT):
+    def __init__(self, conn, config: MetricsConfig = DEFAULT, profile=None):
+        from .profile import DEFAULT_PROFILE
         self.cfg = config
+        self.profile = profile or DEFAULT_PROFILE   # athlete-relative constants live here
         self.daily = load_daily(conn, actual_only=True)
         self.workouts = load_workouts(conn)
 
@@ -257,18 +259,18 @@ class Metrics:
         return power_duration_ratio(self.workouts)
 
     def _floor_window_weeks(self):
-        return int(round(self.cfg.floor_window_months * 52 / 12))
+        return int(round(self.profile.floor_window_months * 52 / 12))
 
     def personal_ctl_floor_asof(self):
         """No-lookahead dynamic floor for the early-warning variant."""
         return demonstrated_sustainable_floor(
-            self.daily["ctl"].astype(float), self.cfg.floor_hold_weeks,
+            self.daily["ctl"].astype(float), self.profile.floor_hold_weeks,
             self._floor_window_weeks(), as_of=True)
 
     def personal_ctl_floor(self):
         """Retrospective demonstrated-best floor (constant scalar broadcast daily)."""
         return demonstrated_sustainable_floor(
-            self.daily["ctl"].astype(float), self.cfg.floor_hold_weeks,
+            self.daily["ctl"].astype(float), self.profile.floor_hold_weeks,
             self._floor_window_weeks(), as_of=False)
 
     def tiz_power_distribution(self):

@@ -101,7 +101,7 @@ def _context_notes(m, as_of, scfg):
     if seg.empty:
         return notes
     ctl_now = float(seg.iloc[-1])
-    p25 = float(m.ctl_percentile_threshold(scfg.detraining_pctile, as_of=True).asof(as_of))
+    p25 = float(m.ctl_percentile_threshold(m.profile.detraining_pctile, as_of=True).asof(as_of))
     if not pd.isna(p25) and ctl_now < p25:
         notes.append({"id": "fitness_below_normal_range", "metric": "ctl",
                       "value": round(ctl_now, 1), "reference": round(p25, 1),

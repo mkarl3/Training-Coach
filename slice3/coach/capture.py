@@ -28,11 +28,13 @@ from .config import DEFAULT
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS checkin (
     id          INTEGER PRIMARY KEY,
+    athlete_id  INTEGER NOT NULL DEFAULT 1,
     date        TEXT NOT NULL,            -- the check-in's anchor date (ISO)
     created_at  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS subjective_note (
     id          INTEGER PRIMARY KEY,
+    athlete_id  INTEGER NOT NULL DEFAULT 1,   -- scopes the note to an athlete
     checkin_id  INTEGER NOT NULL REFERENCES checkin(id),
     date        TEXT NOT NULL,            -- the day the note is ABOUT (keys onto daily timeline)
     category    TEXT NOT NULL,            -- closed enum, see NoteCategory
@@ -158,25 +160,31 @@ def extract_notes(message, checkin_date, client=None, cfg=DEFAULT):
 # --------------------------------------------------------------------------- #
 def ensure_schema(conn):
     conn.executescript(SCHEMA)
+    # idempotent migration for stores created before athlete scoping existed
+    for table in ("checkin", "subjective_note"):
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})")]
+        if "athlete_id" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN athlete_id INTEGER NOT NULL DEFAULT 1")
+    conn.commit()
 
 
-def store_checkin(conn, checkin_date, notes, created_at):
+def store_checkin(conn, checkin_date, notes, created_at, athlete_id=1):
     """Persist a check-in + its validated notes. Returns checkin_id."""
     ensure_schema(conn)
-    cur = conn.execute("INSERT INTO checkin (date, created_at) VALUES (?, ?)",
-                       (checkin_date, created_at))
+    cur = conn.execute("INSERT INTO checkin (athlete_id, date, created_at) VALUES (?,?,?)",
+                       (athlete_id, checkin_date, created_at))
     cid = cur.lastrowid
     conn.executemany(
-        "INSERT INTO subjective_note (checkin_id, date, category, note, quote, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        [(cid, n.date, n.category.value, n.note, n.quote, created_at) for n in notes])
+        "INSERT INTO subjective_note (athlete_id, checkin_id, date, category, note, quote, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [(athlete_id, cid, n.date, n.category.value, n.note, n.quote, created_at) for n in notes])
     conn.commit()
     return cid
 
 
-def notes_for_window(conn, start, end):
-    """Dated notes inside [start, end] — how the engine corroborates findings later."""
+def notes_for_window(conn, start, end, athlete_id=1):
+    """Dated notes inside [start, end] for an athlete — how the engine corroborates later."""
     ensure_schema(conn)
     return list(conn.execute(
         "SELECT date, category, note, quote FROM subjective_note "
-        "WHERE date BETWEEN ? AND ? ORDER BY date", (start, end)))
+        "WHERE athlete_id=? AND date BETWEEN ? AND ? ORDER BY date", (athlete_id, start, end)))
