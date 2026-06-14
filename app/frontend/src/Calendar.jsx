@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-const PHASE_COLOR = { base: "#6c8aa0", build: "#2f6f6a", peak: "#b9883b", taper: "#8a8f97" };
+const PHASE_COLOR = { base: "#3a6ad8", build: "#4ac94a", peak: "#f7d51d", taper: "#5e6e96" };
 
 function CtlChart({ weeks, meta }) {
   const W = 820, H = 150, pad = { l: 28, r: 10, t: 10, b: 18 };
@@ -21,24 +21,24 @@ function CtlChart({ weeks, meta }) {
       ))}
       {/* target + floor reference lines */}
       <line x1={pad.l} x2={W - pad.r} y1={ys(meta.target_peak_ctl)} y2={ys(meta.target_peak_ctl)}
-        stroke="#b15a4e" strokeDasharray="4 3" />
-      <text x={W - pad.r} y={ys(meta.target_peak_ctl) - 3} fontSize="9" fill="#b15a4e" textAnchor="end">
+        stroke="#e84444" strokeDasharray="4 3" />
+      <text x={W - pad.r} y={ys(meta.target_peak_ctl) - 3} fontSize="9" fill="#e84444" textAnchor="end">
         target {meta.target_peak_ctl}
       </text>
-      <polyline points={line} fill="none" stroke="#2f6f6a" strokeWidth="2.5" strokeLinejoin="round"
+      <polyline points={line} fill="none" stroke="#4ac94a" strokeWidth="2.5" strokeLinejoin="round"
         strokeDasharray="5 3" />
       {actual && (
-        <polyline points={actual} fill="none" stroke="#b15a4e" strokeWidth="2.5" strokeLinejoin="round" />
+        <polyline points={actual} fill="none" stroke="#e84444" strokeWidth="2.5" strokeLinejoin="round" />
       )}
       {weeks.map((w, i) => (
         <circle key={i} cx={xs(i)} cy={ys(w.ctl_target)} r={w.is_recovery ? 3 : 2.5}
-          fill={w.is_recovery ? "#fff" : "#2f6f6a"} stroke="#2f6f6a" />
+          fill={w.is_recovery ? "#fff" : "#4ac94a"} stroke="#4ac94a" />
       ))}
       {weeks.map((w, i) => (w.actual_ctl != null ? (
-        <circle key={"a" + i} cx={xs(i)} cy={ys(w.actual_ctl)} r={2.5} fill="#b15a4e" stroke="#b15a4e" />
+        <circle key={"a" + i} cx={xs(i)} cy={ys(w.actual_ctl)} r={2.5} fill="#e84444" stroke="#e84444" />
       ) : null))}
-      <text x={pad.l} y={pad.t + 8} fontSize="9" fill="#2f6f6a">— — planned</text>
-      {actual && <text x={pad.l + 70} y={pad.t + 8} fontSize="9" fill="#b15a4e">—— actual</text>}
+      <text x={pad.l} y={pad.t + 8} fontSize="9" fill="#4ac94a">— — planned</text>
+      {actual && <text x={pad.l + 70} y={pad.t + 8} fontSize="9" fill="#e84444">—— actual</text>}
       {[ymin, Math.round((ymin + ymax) / 2), ymax].map((v, n) => (
         <text key={n} x="2" y={ys(v) + 3} fontSize="9" fill="var(--muted)">{Math.round(v)}</text>
       ))}

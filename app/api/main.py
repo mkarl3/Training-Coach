@@ -27,14 +27,14 @@ from wko_ingest import loader, validator               # noqa: E402
 from coach import store, capture as coach_capture     # noqa: E402
 from coach.orchestrator import Coach                   # noqa: E402
 from coach.retrieval import MethodologyIndex           # noqa: E402
-from plan import store as plan_store, generator as plan_gen, diary as plan_diary  # noqa: E402
+from plan import store as plan_store, generator as plan_gen, diary as plan_diary, review as plan_review  # noqa: E402
 
 WKO_DB = os.environ.get("WKO_DB", os.path.join(ROOT, "slice0", "wko.db"))
 EXPORTS_DIR = os.path.join(ROOT, "WKO5 Exports")
 COACH_DB = os.path.join(ROOT, "slice3", "coach.db")
 INDEX_DB = os.path.join(ROOT, "slice3", "methodology.db")
 
-app = FastAPI(title="Training Coach API", version="0.1")
+app = FastAPI(title="Watt Smith API", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 _S = {}
@@ -342,6 +342,21 @@ def message(body: MessageIn):
 @app.get("/api/coach/advisories")
 def advisories():
     return {"recurring_themes": _compute_advisories()}
+
+
+def _weekly_briefing():
+    """Compose the deterministic weekly briefing and seed it into the coach's context so the
+    next reply narrates it (the coach never recomputes these numbers)."""
+    themes = _compute_advisories()
+    b = plan_review.weekly_briefing(_S["m"], _S.get("plan"), _S["status"], themes, _S["as_of"])
+    if _S.get("coach"):
+        _S["coach"].weekly_briefing = plan_review.briefing_text(b)
+    return b
+
+
+@app.get("/api/coach/weekly-briefing")
+def weekly_briefing():
+    return _weekly_briefing()
 
 
 class ConfirmIn(BaseModel):

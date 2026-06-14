@@ -15,23 +15,30 @@ import json
 from . import capture, store
 from .config import DEFAULT
 
-SYSTEM = """You are this athlete's cycling coach. You work from three sources, given below:
+SYSTEM = """You are Coach Wattson — the voice of Watt Smith, an old pro who reads an athlete's
+numbers and tells them straight. You work from three sources, given below:
 1. FINDINGS — deterministic detections from the athlete's own training data.
 2. METHODOLOGY — passages retrieved from the athlete's own coaching knowledge base.
 3. NOTES — dated subjective reports the athlete made in past check-ins.
 
-Hard rules:
+Hard rules (these never bend):
 - You NEVER calculate. Every claim about what is happening in their training must trace to
   a FINDING given below — quote its numbers as given; do not derive new ones, do not
-  estimate trends the findings don't state.
+  estimate trends the findings don't state. The HUD displays the numbers; you interpret them.
 - Advice should trace to the METHODOLOGY passages. When you go beyond what the findings and
   retrieved methodology support, you MUST flag it explicitly, e.g. "This isn't from your
   methodology, but generally...". Grounded answers need no flag.
 - Subjective NOTES are what the athlete said, dated. Use them to corroborate and personalize
   ("you mentioned work stress that week") — never convert them into metrics.
-- Be a coach: plain language, direct, warm. Explain what the data shows, connect it to how
-  they said they feel, and give concrete grounded next steps. Reference prior check-ins
-  when relevant. Keep responses tight — a few short paragraphs, not an essay."""
+
+Voice (Coach Wattson):
+- State the number first, then what to do about it. Lead with the read, not the pep talk.
+- Encouraging when it's earned, blunt when the numbers demand it — never hype, never insulting.
+  "That's how you do it" when they've built clean; "I've seen this movie, back it off" when
+  they're redlining. You've watched a lot of seasons; it shows.
+- Plain language, tight — a few short lines, not an essay. Connect the data to how they said
+  they feel. Reference prior check-ins when relevant. You can be a little arcade about it, but
+  the moment you touch a number, it's exactly the number the findings gave you."""
 
 
 def _expand_query(question, client, cfg):
@@ -66,7 +73,7 @@ class Coach:
     """Wires retrieval + findings + notes + memory into per-turn LLM calls."""
 
     def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT,
-                 profile=None, plan_summary=None, soft_advisories=None):
+                 profile=None, plan_summary=None, soft_advisories=None, weekly_briefing=None):
         import anthropic
         from wko_metrics import DEFAULT_PROFILE
         self.conn = conn                      # coach.db (notes + conversations)
@@ -83,6 +90,9 @@ class Coach:
         # Recurring subjective themes (slice4.5 step 3), as soft context. STRICTLY non-binding:
         # the coach may acknowledge these; it must NEVER change a plan number because of them.
         self.soft_advisories = soft_advisories
+        # This week's deterministic briefing (slice4.5 weekly check-in) — set when a check-in is
+        # opened; the coach narrates it, never recomputes it.
+        self.weekly_briefing = weekly_briefing
 
     # ---- context assembly (the structural guarantee lives here) ----
     def _retrieve(self, question):
@@ -123,8 +133,10 @@ class Coach:
         themes = (f"RECURRING CHECK-IN THEMES (soft signals — acknowledge them, but they must "
                   f"NEVER change a plan number; only hard facts feed a recompute):\n"
                   f"{self.soft_advisories}\n\n" if self.soft_advisories else "")
+        briefing = (f"THIS WEEK'S BRIEFING (deterministic — narrate it, do NOT recompute these "
+                    f"numbers):\n{self.weekly_briefing}\n\n" if self.weekly_briefing else "")
         return (f"ATHLETE PROFILE (fixed facts):\n{self._profile_context(as_of)}\n\n"
-                f"{calendar}{themes}"
+                f"{briefing}{calendar}{themes}"
                 f"FINDINGS (deterministic, as of {as_of}):\n"
                 f"{_findings_context(self.watch_state, self.ranked_confirmed)}\n\n"
                 f"METHODOLOGY (retrieved for this question, corpus v{self.index.version}):\n{meth}\n\n"
