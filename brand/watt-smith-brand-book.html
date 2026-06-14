@@ -1,0 +1,398 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watt Smith — Brand Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Outfit:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0b14; --panel:#16213e; --panel-2:#1d2c52; --panel-3:#0f1830;
+    --red:#e84444; --blue:#5c8cde; --jacket:#3a6ad8; --green:#4ac94a; --gold:#f7d51d;
+    --cream:#f4f4f0; --ink-2:#9fb0d8; --ink-3:#5e6e96;
+    --pix:'Press Start 2P',system-ui,sans-serif;
+    --ui:'Outfit',system-ui,sans-serif;
+    --data:'IBM Plex Mono',monospace;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--cream); font-family:var(--ui); font-size:1rem; line-height:1.5;
+    padding:clamp(1rem,4vw,2.4rem); }
+  /* CRT scanlines + vignette (chrome only — never lowers data contrast, panels are solid) */
+  body::after{ content:""; position:fixed; inset:0; pointer-events:none; z-index:9999;
+    background:repeating-linear-gradient(rgba(0,0,0,0) 0 2px, rgba(0,0,0,.13) 2px 3px); }
+  body::before{ content:""; position:fixed; inset:0; pointer-events:none; z-index:9998;
+    background:radial-gradient(ellipse 90% 75% at 50% 40%, transparent 55%, #000a 100%); }
+  .doc{ max-width:1000px; margin:0 auto; position:relative; z-index:1; }
+
+  /* pixel-notched window */
+  .pbox{ background:var(--panel); position:relative; margin:8px;
+    box-shadow:
+      0 -4px 0 var(--cream),0 4px 0 var(--cream),-4px 0 0 var(--cream),4px 0 0 var(--cream),
+      0 -8px 0 #07070e,0 8px 0 #07070e,-8px 0 0 #07070e,8px 0 0 #07070e,
+      10px 12px 0 #00000066; }
+  .hd{ font-family:var(--ui); font-weight:800; font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:#0b0b14; padding:.55rem .9rem; display:flex; justify-content:space-between; align-items:center; }
+  .hd.red{ background:var(--red); color:#fff; } .hd.blue{ background:var(--blue); } .hd.green{ background:var(--green); }
+  .hd.gold{ background:var(--gold); } .hd.jacket{ background:var(--jacket); color:#fff; }
+  .hd .pin{ font-family:var(--pix); font-size:.5rem; }
+  .bd{ padding:1.2rem; }
+
+  .secnum{ font-family:var(--pix); font-size:.6rem; color:var(--gold); }
+
+  /* pixel divider */
+  .div{ display:flex; gap:6px; justify-content:center; margin:6px 0 26px; }
+  .div i{ width:10px; height:10px; background:var(--ink-3); }
+  .div i:nth-child(3n){ background:var(--gold); } .div i:nth-child(3n+1){ background:var(--red); }
+
+  /* ===== COVER ===== */
+  .cover{ text-align:center; padding:2.4rem 1rem 2rem; position:relative;
+    background:radial-gradient(circle at 50% 30%, #1a1d3a 0%, #0b0b14 70%); }
+  .cover .player{ font-family:var(--pix); font-size:.55rem; color:var(--green); letter-spacing:.12em; }
+  .cover .badge{ background:#f3ead3; width:150px; margin:1.2rem auto; border-radius:10px; padding:14px; }
+  .cover .badge svg{ image-rendering:pixelated; width:100%; height:auto; }
+  .cover .wm{ font-family:var(--pix); font-size:clamp(1.6rem,7vw,3rem); color:var(--gold); line-height:1.25;
+    text-shadow:3px 3px 0 var(--red), 6px 6px 0 #000, 0 0 22px #f7d51d55; margin:.3rem 0; }
+  .cover .tag{ font-weight:600; font-size:1.15rem; color:var(--blue); margin-top:1rem; }
+  .cover .coin{ font-family:var(--pix); font-size:.5rem; color:var(--ink-2); margin-top:1.4rem; letter-spacing:.1em; animation:blink 1.1s steps(2) infinite; }
+  @keyframes blink{ 50%{ opacity:.25; } }
+
+  h2.sec{ font-family:var(--ui); font-weight:800; font-size:1.4rem; margin:0; }
+  .lead{ color:var(--ink-2); font-weight:500; font-size:.92rem; max-width:64ch; margin:.5rem 0 1rem 8px; }
+
+  /* logo construction */
+  .construct{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media(max-width:640px){ .construct{ grid-template-columns:1fr; } }
+  .clearbox{ background:var(--panel-3); padding:1.4rem; position:relative; }
+  .clearbox .lg{ font-family:var(--pix); font-size:1rem; color:var(--gold); text-shadow:2px 2px 0 var(--red); position:relative; z-index:2; }
+  .clearbox .grid{ position:absolute; inset:0; background-image:repeating-linear-gradient(#ffffff10 0 1px, transparent 1px 14px),repeating-linear-gradient(90deg,#ffffff10 0 1px, transparent 1px 14px); }
+  .rule{ font-size:.85rem; color:var(--ink-2); font-weight:500; line-height:1.6; }
+  .rule b{ color:var(--cream); }
+
+  /* misuse */
+  .dont{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:14px; }
+  @media(max-width:640px){ .dont{ grid-template-columns:1fr; } }
+  .dont .x{ background:var(--panel-3); border-left:4px solid var(--red); padding:.7rem .8rem; font-size:.82rem; font-weight:500; color:var(--ink-2); }
+  .dont .x b{ color:var(--red); display:block; font-size:.7rem; text-transform:uppercase; letter-spacing:.06em; margin-bottom:.2rem; }
+
+  /* mascot */
+  .moods{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  @media(max-width:640px){ .moods{ grid-template-columns:1fr; } }
+  .mood{ background:#f3ead3; border-radius:8px; padding:10px; text-align:center; }
+  .mood svg{ image-rendering:pixelated; width:100%; max-width:120px; height:auto; }
+  .mood .ml{ font-family:var(--pix); font-size:.5rem; color:#1a2a4a; margin-top:.4rem; }
+
+  /* color */
+  .roles{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; }
+  .role .chip{ height:56px; border-radius:5px 5px 0 0; }
+  .role .m{ background:var(--panel-3); padding:.5rem .6rem; border-radius:0 0 5px 5px; }
+  .role .m b{ font-size:.85rem; display:block; } .role .m code{ font-family:var(--data); font-size:.66rem; color:var(--ink-2); display:block; margin-top:.15rem; }
+  .role .m span{ font-size:.66rem; color:var(--ink-3); }
+
+  /* type */
+  .trow{ display:flex; align-items:baseline; gap:18px; padding:.7rem 0; border-bottom:1px solid #ffffff14; }
+  .trow:last-child{ border-bottom:0; } .trow .l{ font-family:var(--data); font-size:.68rem; color:var(--ink-3); width:130px; flex:0 0 auto; }
+  .scaletab{ width:100%; border-collapse:collapse; font-size:.85rem; }
+  .scaletab td,.scaletab th{ text-align:left; padding:.4rem .5rem; border-bottom:1px solid #ffffff12; }
+  .scaletab th{ font-family:var(--data); font-size:.66rem; text-transform:uppercase; color:var(--ink-3); }
+  .scaletab .mono{ font-family:var(--data); color:var(--ink-2); }
+
+  /* principle */
+  .pcols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:640px){ .pcols{ grid-template-columns:1fr; } }
+  .pcols h4{ margin:0 0 .5rem; font-weight:800; font-size:.82rem; text-transform:uppercase; letter-spacing:.05em; }
+  .yes h4{ color:var(--green); } .no h4{ color:var(--red); }
+  .pcols ul{ margin:0; padding-left:1.1rem; color:var(--ink-2); font-size:.85rem; font-weight:500; line-height:1.75; }
+
+  /* components */
+  .dl{ font-family:var(--data); font-size:.68rem; text-transform:uppercase; letter-spacing:.1em; color:var(--ink-3); margin:22px 0 .6rem; }
+  .dl:first-child{ margin-top:0; }
+  .demo{ display:flex; flex-wrap:wrap; gap:12px; align-items:center; }
+  .btn{ font-family:var(--ui); font-weight:800; text-transform:uppercase; font-size:.82rem; letter-spacing:.04em; padding:.7rem 1.1rem; border:0; cursor:pointer; box-shadow:4px 4px 0 #00000088; }
+  .btn-primary{ background:var(--gold); color:#0b0b14; } .btn-secondary{ background:var(--jacket); color:#fff; }
+  .btn-ghost{ background:transparent; color:var(--cream); box-shadow:inset 0 0 0 3px var(--cream); }
+  .bs{ font-family:var(--ui); font-weight:800; font-size:.68rem; text-transform:uppercase; padding:.25rem .6rem; color:#0b0b14; }
+  .bg-clear{ background:var(--green); } .bg-mon{ background:var(--gold); } .bg-over{ background:var(--red); color:#fff; } .bg-stable{ background:var(--blue); }
+  .tiles{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  @media(max-width:640px){ .tiles{ grid-template-columns:1fr 1fr; } }
+  .tile .n{ font-family:var(--data); font-weight:600; font-size:1.8rem; line-height:1; }
+  .tile .d{ font-family:var(--data); font-size:.66rem; margin-top:.3rem; }
+  .tile .d.up{ color:var(--green); } .tile .d.warn{ color:var(--gold); } .tile .d.crit{ color:var(--red); }
+
+  /* dialogue */
+  .dlg{ display:grid; grid-template-columns:auto 1fr; }
+  .dlg .port{ background:#f3ead3; display:flex; align-items:flex-end; justify-content:center; padding:8px 8px 0; }
+  .dlg .port svg{ image-rendering:pixelated; width:86px; height:auto; }
+  .dlg .txt{ padding:1rem 1.1rem; }
+  .dlg .who{ font-weight:800; color:var(--green); font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:.4rem; }
+  .dlg p{ margin:0; font-weight:500; font-size:1rem; line-height:1.5; }
+  .blink::after{ content:"▼"; color:var(--gold); margin-left:.3rem; animation:blink .9s steps(2) infinite; }
+
+  /* charts */
+  .charts{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media(max-width:640px){ .charts{ grid-template-columns:1fr; } }
+  .axis{ display:flex; justify-content:space-between; font-family:var(--data); font-size:.66rem; color:var(--ink-2); margin-top:.3rem; }
+
+  /* voice */
+  .vt{ width:100%; border-collapse:collapse; }
+  .vt td{ padding:.6rem .7rem; border-bottom:1px solid #ffffff12; vertical-align:top; }
+  .vt .mood{ font-family:var(--data); font-size:.7rem; text-transform:uppercase; white-space:nowrap; font-weight:600; }
+  .vt .ex{ font-style:italic; color:#e8ecf6; font-weight:500; }
+
+  pre{ background:#07070e; border:2px solid var(--panel-2); padding:1rem; overflow:auto; font-family:var(--data); font-size:.72rem; color:#b8c4e0; line-height:1.6; margin:0; }
+  .footer{ font-family:var(--pix); font-size:.5rem; color:#445; text-align:center; padding:1.6rem 0 .4rem; line-height:2.2; }
+</style>
+
+<div class="doc">
+
+  <!-- COVER -->
+  <div class="pbox"><div class="cover">
+    <div class="player">★ PLAYER 1 ★</div>
+    <div class="badge"><div id="cover-coach"></div></div>
+    <div class="wm">WATT SMITH</div>
+    <div class="tag">Real numbers. A coach who reads them.</div>
+    <div class="coin">— BRAND BOOK v1.0 · INSERT COIN —</div>
+  </div></div>
+
+  <div class="div"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+
+  <!-- 01 LOGO -->
+  <div class="pbox"><div class="hd gold"><span><span class="secnum">01</span> &nbsp;Logo &amp; Wordmark</span><span class="pin">A</span></div>
+    <div class="bd">
+      <p class="lead">The wordmark is set in Press Start 2P with a hard red drop-shadow and a faint screen-glow. It is the only place the pixel typeface appears at large size. Treat it as an arcade title card.</p>
+      <div class="construct">
+        <div class="clearbox"><div class="grid"></div><div class="lg">WATT SMITH</div></div>
+        <div>
+          <p class="rule"><b>Clearspace.</b> Keep a margin of one capital "W" (in the pixel face) on all sides. Nothing intrudes.<br><br>
+          <b>Minimum size.</b> Never below 16px cap-height on screen — under that the pixels mush and it stops reading.<br><br>
+          <b>Drop-shadow.</b> Red <code style="font-family:var(--data)">#E84444</code> offset 3px down/right is mandatory. The glow is optional and only on dark.<br><br>
+          <b>Lockup.</b> Coach Wattson may sit to the left of the wordmark at equal cap-height for app icons and splash screens.</p>
+        </div>
+      </div>
+      <div class="dont">
+        <div class="x"><b>✕ Don't</b> recolor the wordmark or drop the red shadow.</div>
+        <div class="x"><b>✕ Don't</b> set body text or numbers in the pixel face.</div>
+        <div class="x"><b>✕ Don't</b> stretch, skew, or add bevels/gradients.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 MASCOT -->
+  <div class="pbox"><div class="hd red"><span><span class="secnum">02</span> &nbsp;Coach Wattson</span><span class="pin">B</span></div>
+    <div class="bd">
+      <p class="lead">Coach Wattson is the app's voice — the face on the early-warning dashboard and the coach interface. An old pro: blunt when the numbers demand it, warm when you've earned it. He carries the personality so the data screens stay clinical. Red-and-white casquette, blue track jacket, stopwatch on a cord. He is <b>live SVG</b>, never a flat image — recolorable, sharp at any size, and all moods derive from one base.</p>
+      <div class="moods">
+        <div class="mood"><div id="mood-calm"></div><div class="ml">CALM · IN-BAND</div></div>
+        <div class="mood"><div id="mood-alarm"></div><div class="ml">ALARMED · ALERT</div></div>
+        <div class="mood"><div id="mood-approve"></div><div class="ml">APPROVING · STREAK</div></div>
+      </div>
+      <div class="dont">
+        <div class="x"><b>✕ Don't</b> rasterize him to a blurry PNG — keep him pixel-crisp.</div>
+        <div class="x"><b>✕ Don't</b> give him a helmet. He wears the cap, always.</div>
+        <div class="x"><b>✕ Don't</b> let him deliver raw metrics — he interprets, the HUD displays.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 03 COLOR -->
+  <div class="pbox"><div class="hd blue"><span><span class="secnum">03</span> &nbsp;Color</span><span class="pin">C</span></div>
+    <div class="bd">
+      <p class="lead">Wattson's kit is the palette. Jacket-blue is primary; cap-red is energy and critical alerts; gold is attention and rewards. Status colors are semantic only — never decoration. Everything lives on night-navy so the limited palette stays punchy.</p>
+      <div class="roles">
+        <div class="role"><div class="chip" style="background:#3a6ad8"></div><div class="m"><b>Jacket Blue</b><code>#3A6AD8 · 58,106,216</code><span>Primary action</span></div></div>
+        <div class="role"><div class="chip" style="background:#5c8cde"></div><div class="m"><b>Sky Blue</b><code>#5C8CDE · 92,140,222</code><span>Info / links</span></div></div>
+        <div class="role"><div class="chip" style="background:#e84444"></div><div class="m"><b>Cap Red</b><code>#E84444 · 232,68,68</code><span>Energy / critical</span></div></div>
+        <div class="role"><div class="chip" style="background:#f7d51d"></div><div class="m"><b>Gold</b><code>#F7D51D · 247,213,29</code><span>Attention / reward</span></div></div>
+        <div class="role"><div class="chip" style="background:#4ac94a"></div><div class="m"><b>Green</b><code>#4AC94A · 74,201,74</code><span>Clear / healthy</span></div></div>
+        <div class="role"><div class="chip" style="background:#16213e"></div><div class="m"><b>Panel Navy</b><code>#16213E · 22,33,62</code><span>Surfaces</span></div></div>
+        <div class="role"><div class="chip" style="background:#0b0b14"></div><div class="m"><b>Night</b><code>#0B0B14 · 11,11,20</code><span>Background</span></div></div>
+        <div class="role"><div class="chip" style="background:#f4f4f0"></div><div class="m"><b>Cream</b><code>#F4F4F0 · 244,244,240</code><span>Text / borders</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 04 TYPE -->
+  <div class="pbox"><div class="hd green"><span><span class="secnum">04</span> &nbsp;Typography</span><span class="pin">D</span></div>
+    <div class="bd">
+      <p class="lead">Three typefaces, strict lanes. Press Start 2P is logo &amp; arcade accents <b>only</b>. Outfit is every readable UI text. Plex Mono is every number — so data aligns and stays sharp.</p>
+      <div class="trow"><span class="l">PIX · logo only</span><span style="font-family:var(--pix);color:var(--gold);font-size:1rem">WATT SMITH</span></div>
+      <div class="trow"><span class="l">Outfit 800</span><span style="font-weight:800;font-size:1.7rem">Season readiness</span></div>
+      <div class="trow"><span class="l">Outfit 500</span><span style="font-weight:500">Ramp rate exceeded the safe band three of five weeks.</span></div>
+      <div class="trow"><span class="l">Plex Mono</span><span style="font-family:var(--data);font-size:1.3rem">CTL 78 · TSB −14 · 301 W</span></div>
+      <table class="scaletab" style="margin-top:16px">
+        <tr><th>Token</th><th>Face</th><th>Size</th><th>Use</th></tr>
+        <tr><td class="mono">--t-logo</td><td>Press Start 2P</td><td class="mono">≥16px</td><td>Logo, arcade titles</td></tr>
+        <tr><td class="mono">--t-h1</td><td>Outfit 800</td><td class="mono">1.9rem</td><td>Screen titles</td></tr>
+        <tr><td class="mono">--t-h2</td><td>Outfit 700</td><td class="mono">1.3rem</td><td>Section heads</td></tr>
+        <tr><td class="mono">--t-body</td><td>Outfit 500</td><td class="mono">1.0rem</td><td>Body, labels</td></tr>
+        <tr><td class="mono">--t-data</td><td>Plex Mono 600</td><td class="mono">var.</td><td>All numbers</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 05 PRINCIPLE -->
+  <div class="pbox"><div class="hd jacket"><span><span class="secnum">05</span> &nbsp;The Core Principle</span><span class="pin">E</span></div>
+    <div class="bd">
+      <p class="lead">The single rule the whole brand hangs on: <b>nostalgia lives in the art, never in the data.</b> The retro feeling comes from texture and character; the metrics stay clinical and legible.</p>
+      <div class="pcols">
+        <div class="yes"><h4>✓ 8-bit / CRT carries</h4><ul><li>Coach Wattson sprite</li><li>NES palette &amp; scanlines</li><li>Notched pixel-border windows</li><li>Dialogue boxes, hearts, stars</li><li>The logo &amp; arcade accents</li></ul></div>
+        <div class="no"><h4>✕ Stays clean &amp; legible</h4><ul><li>Numbers &amp; metrics (Plex Mono)</li><li>Labels &amp; body (Outfit)</li><li>Charts — smooth SVG lines</li><li>Tables &amp; data grids</li><li>Anything you read to decide</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 06 CRT TREATMENT -->
+  <div class="pbox"><div class="hd gold"><span><span class="secnum">06</span> &nbsp;CRT &amp; Texture</span><span class="pin">F</span></div>
+    <div class="bd">
+      <p class="lead">The CRT layer is what makes this feel like a cartridge and not a web app. Three ingredients — used on chrome, dialed back on data.</p>
+      <div class="pcols">
+        <div class="yes"><h4>✓ Apply to</h4><ul><li>Scanlines — global overlay, ~13% opacity, 3px pitch</li><li>Vignette — soft darkened screen edges</li><li>Pixel-notched borders + hard offset shadows on every window</li><li>Subtle glow on the logo (dark backgrounds only)</li></ul></div>
+        <div class="no"><h4>✕ Hold back on</h4><ul><li>Never let scanlines drop metric contrast — data panels keep solid fills</li><li>No flicker/wobble on screens you read numbers from</li><li>No curvature distortion over charts or tables</li><li>Vignette stays off dense data views</li></ul></div>
+      </div>
+      <p class="rule" style="margin-top:14px"><b>This very document</b> uses the full treatment — scanlines, vignette, glow — so you can judge the maximum. In-app, the dashboard runs it lighter.</p>
+    </div>
+  </div>
+
+  <!-- 07 COMPONENTS -->
+  <div class="pbox"><div class="hd red"><span><span class="secnum">07</span> &nbsp;Components</span><span class="pin">G</span></div>
+    <div class="bd">
+      <div class="dl">Buttons</div>
+      <div class="demo"><button class="btn btn-primary">Generate plan</button><button class="btn btn-secondary">Compare weeks</button><button class="btn btn-ghost">View source</button></div>
+      <div class="dl">Status badges</div>
+      <div class="demo"><span class="bs bg-clear">clear</span><span class="bs bg-mon">monitor</span><span class="bs bg-over">overreached</span><span class="bs bg-stable">stable</span></div>
+      <div class="dl">Data tiles — pixel frame, clean number</div>
+      <div class="tiles">
+        <div class="pbox tile" style="margin:0"><div class="hd blue">CTL</div><div class="bd"><div class="n">78</div><div class="d up">▲ 8.2/wk</div></div></div>
+        <div class="pbox tile" style="margin:0"><div class="hd blue">ATL</div><div class="bd"><div class="n">92</div><div class="d crit">▲ fast</div></div></div>
+        <div class="pbox tile" style="margin:0"><div class="hd gold">TSB</div><div class="bd"><div class="n">−14</div><div class="d warn">▼ falling</div></div></div>
+        <div class="pbox tile" style="margin:0"><div class="hd red">mFTP</div><div class="bd"><div class="n">301</div><div class="d">watts</div></div></div>
+      </div>
+      <div class="dl">Coach dialogue box</div>
+      <div class="pbox dlg" style="margin:0"><div class="port"><div id="comp-coach"></div></div>
+        <div class="txt"><div class="who">Coach Wattson</div><p>Easy, killer. Ramp rate's at 8.2 a week and form's down to −14 — same hole you dug in March. Two easy days, then re-test Thursday.<span class="blink"></span></p></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 08 CHARTS -->
+  <div class="pbox"><div class="hd blue"><span><span class="secnum">08</span> &nbsp;Charts &amp; Data</span><span class="pin">H</span></div>
+    <div class="bd">
+      <p class="lead">Charts are smooth SVG, never pixelated — but they live inside pixel-framed windows and use the brand palette. Lines are 2–3px, gridlines barely-there, and the "hot/now" point is marked in red. Legibility wins every time.</p>
+      <div class="charts">
+        <div class="pbox" style="margin:0"><div class="hd green">Fitness trend · CTL · 8wk</div><div class="bd">
+          <svg viewBox="0 0 320 120" style="width:100%;height:auto">
+            <g stroke="#ffffff14" stroke-width="1"><line x1="0" y1="30" x2="320" y2="30"/><line x1="0" y1="60" x2="320" y2="60"/><line x1="0" y1="90" x2="320" y2="90"/></g>
+            <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4ac94a" stop-opacity=".4"/><stop offset="1" stop-color="#4ac94a" stop-opacity="0"/></linearGradient></defs>
+            <path d="M0,104 L0,98 C42,94 70,80 110,72 S180,44 230,32 L280,20 L320,12 L320,104 Z" fill="url(#g1)"/>
+            <path d="M0,98 C42,94 70,80 110,72 S180,44 230,32 L280,20 L320,12" fill="none" stroke="#4ac94a" stroke-width="2.5"/>
+            <circle cx="320" cy="12" r="5" fill="#e84444" stroke="#fff" stroke-width="2"/>
+          </svg>
+          <div class="axis"><span>WK 1</span><span style="color:var(--red)">NOW · HOT</span></div>
+        </div></div>
+        <div class="pbox" style="margin:0"><div class="hd green">Weekly load · TSS</div><div class="bd">
+          <svg viewBox="0 0 320 120" style="width:100%;height:auto">
+            <g stroke="#ffffff14" stroke-width="1"><line x1="0" y1="30" x2="320" y2="30"/><line x1="0" y1="60" x2="320" y2="60"/><line x1="0" y1="90" x2="320" y2="90"/></g>
+            <g>
+              <rect x="14" y="74" width="30" height="34" fill="#3a6ad8"/><rect x="58" y="60" width="30" height="48" fill="#3a6ad8"/>
+              <rect x="102" y="66" width="30" height="42" fill="#3a6ad8"/><rect x="146" y="48" width="30" height="60" fill="#3a6ad8"/>
+              <rect x="190" y="40" width="30" height="68" fill="#5c8cde"/><rect x="234" y="30" width="30" height="78" fill="#5c8cde"/>
+              <rect x="278" y="18" width="30" height="90" fill="#e84444"/>
+            </g>
+          </svg>
+          <div class="axis"><span>WK 1</span><span style="color:var(--red)">NOW · 612</span></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 09 VOICE -->
+  <div class="pbox"><div class="hd gold"><span><span class="secnum">09</span> &nbsp;Voice &amp; Tone</span><span class="pin">I</span></div>
+    <div class="bd">
+      <p class="lead">Wattson states the number first, then what to do. Encouraging when earned, blunt when needed — never hype, never insulting. App UI copy stays plain and factual; Wattson adds the warmth.</p>
+      <table class="vt">
+        <tr><td class="mood" style="color:var(--green)">Calm</td><td class="ex">"Numbers are right where they should be. Keep doing what you're doing — I'll yell if that changes."</td></tr>
+        <tr><td class="mood" style="color:var(--gold)">Alarmed</td><td class="ex">"Whoa. Ramp rate's redlining and form's sliding. I've seen this movie. Back it off two days."</td></tr>
+        <tr><td class="mood" style="color:var(--blue)">Approving</td><td class="ex">"Twenty-eight days, base built clean. That's how you do it. Now don't get greedy."</td></tr>
+        <tr><td class="mood" style="color:var(--ink-2)">App UI</td><td class="ex" style="font-style:normal;color:var(--ink-2)">Plain &amp; factual: "Ramp rate 8.2 CTL/wk. Above safe band 3 of 5 weeks."</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- 10 TOKENS -->
+  <div class="pbox"><div class="hd jacket"><span><span class="secnum">10</span> &nbsp;Tokens — Handoff</span><span class="pin">J</span></div>
+    <div class="bd">
+      <p class="lead">Drop straight into a stylesheet or translate to a Tailwind/TS theme. This is the source of truth.</p>
+<pre>:root{
+  /* surface */
+  --bg:#0b0b14; --panel:#16213e; --panel-2:#1d2c52; --panel-3:#0f1830;
+  /* brand + status */
+  --jacket:#3a6ad8;  /* primary action  (Wattson jacket) */
+  --blue:#5c8cde;    /* info / links */
+  --red:#e84444;     /* energy / critical (Wattson cap) */
+  --gold:#f7d51d;    /* attention / reward */
+  --green:#4ac94a;   /* clear / healthy */
+  /* ink */
+  --cream:#f4f4f0; --ink-2:#9fb0d8; --ink-3:#5e6e96;
+  /* type */
+  --pix:'Press Start 2P';   /* logo + arcade ONLY */
+  --ui:'Outfit';            /* all readable text */
+  --data:'IBM Plex Mono';   /* every number */
+  /* crt */
+  --scanline-opacity:.13; --scanline-pitch:3px;
+}</pre>
+    </div>
+  </div>
+
+  <div class="footer">WATT SMITH · BRAND BOOK v1.0 · COACH WATTSON<br>PRESS START 2P / OUTFIT / IBM PLEX MONO<br>♥ ♥ ♥ ♥ ♥ &nbsp; 1UP</div>
+</div>
+
+<script>
+const S=6;
+const FACE=[[7,6,10],[8,5,12],[9,5,12],[10,5,12],[11,5,12],[12,5,12],[13,5,12],[14,6,10],[15,6,10],[16,7,8],[17,8,6],[18,9,4]];
+const CAP=[[2,8,6],[3,6,10],[4,5,12],[5,5,12],[6,5,12]];
+const O='#14121f';
+const sk={b:'#e0a878',s:'#b07f50',h:'#f4cd9a'}, cap={m:'#e84444',d:'#a82828',l:'#ff8a8a'}, acc='#f0f0f0';
+const jac={m:'#3a6ad8',d:'#2444a0',l:'#5c8cde'}, hair='#5a3a28', brow='#3e2618', fc='#5a3a28', eye='#2a2438';
+
+function rects(expr){
+  let r=''; const P=(x,y,w,h,c)=>{ if(c) r+=`<rect x="${x*S}" y="${y*S}" width="${w*S}" height="${h*S}" fill="${c}"/>`; };
+  CAP.concat(FACE).forEach(([y,x,w])=>P(x-1,y,w+2,1,O)); P(7,1,8,1,O); P(3,6,16,1,O); P(9,19,4,1,O);
+  FACE.forEach(([y,x,w])=>P(x,y,w,1,sk.b)); FACE.forEach(([y,x,w])=>P(x+w-1,y,1,1,sk.s)); P(5,8,1,6,sk.h);
+  P(4,11,1,2,sk.b); P(17,11,1,2,sk.b); P(3,11,1,2,O); P(18,11,1,2,O);
+  P(5,7,1,2,hair); P(16,7,1,2,hair);
+  CAP.forEach(([y,x,w])=>P(x,y,w,1,cap.m)); CAP.forEach(([y,x,w])=>P(x+w-1,y,1,1,cap.d));
+  P(6,2,2,1,cap.l); P(6,3,2,1,cap.l); P(5,4,12,1,acc);
+  P(4,6,14,1,cap.l); P(4,7,14,1,cap.d);
+  // brows by mood
+  if(expr==='alarmed'){ P(6,7,3,1,brow); P(13,7,3,1,brow); P(6,6,1,1,brow); P(15,6,1,1,brow); }
+  else { P(7,8,3,1,brow); P(12,8,3,1,brow); }
+  // eyes
+  P(7,9,3,2,'#fff'); P(8,9,1,2,eye); P(12,9,3,2,'#fff'); P(13,9,1,2,eye);
+  // nose
+  P(10,11,2,2,sk.s); P(9,12,1,1,sk.s);
+  // mustache
+  P(6,13,10,1,fc); P(7,14,8,1,fc); P(5,12,1,1,fc); P(16,12,1,1,fc);
+  // mouth by mood
+  if(expr==='alarmed'){ P(9,15,4,2,'#5a2a22'); P(10,15,2,1,'#2a1410'); }
+  else if(expr==='approving'){ P(8,15,6,1,'#5a2a22'); P(9,15,4,1,'#fff'); P(8,14,1,1,'#7a3b2e'); P(13,14,1,1,'#7a3b2e'); }
+  else { P(9,15,4,1,'#7a3b2e'); P(8,14,1,1,'#7a3b2e'); P(13,14,1,1,'#7a3b2e'); }
+  // extras
+  if(expr==='alarmed'){ P(17,8,1,1,'#6ab4ff'); P(17,9,1,1,'#6ab4ff'); }
+  if(expr==='approving'){ P(2,2,1,1,'#f7d51d'); P(1,3,3,1,'#f7d51d'); P(2,4,1,1,'#f7d51d'); }
+  // jacket
+  P(7,19,8,1,sk.s); P(5,20,12,1,jac.l); P(7,20,1,2,'#f0f0f0'); P(13,20,1,2,'#f0f0f0');
+  P(4,21,14,1,jac.m); P(3,22,16,6,jac.m); P(3,22,1,6,jac.d); P(18,22,1,6,jac.d);
+  P(5,21,1,7,'#f0f0f0'); P(14,21,1,7,'#f0f0f0'); P(10,20,1,8,'#c8c8d0'); P(10,21,1,1,'#9a9aa6');
+  // stopwatch
+  P(8,20,1,1,'#1a1a24'); P(8,21,1,1,'#1a1a24'); P(9,22,1,1,'#1a1a24');
+  P(13,20,1,1,'#1a1a24'); P(13,21,1,1,'#1a1a24'); P(12,22,1,1,'#1a1a24');
+  P(10,22,1,1,'#9a9aa6'); P(10,23,1,1,'#c0c0c8');
+  P(9,24,3,1,O); P(8,25,1,2,O); P(12,25,1,2,O); P(9,27,3,1,O);
+  P(9,24,3,1,'#cfcfd8'); P(9,25,3,2,'#eef0f6'); P(10,24,1,1,'#e84444'); P(10,26,1,1,'#2a2a38'); P(11,25,1,1,'#2a2a38');
+  return r;
+}
+function svg(expr,vb){ return `<svg viewBox="${vb}" shape-rendering="crispEdges" style="width:100%;height:auto">${rects(expr)}</svg>`; }
+const FULL='0 0 132 174', HEAD='0 0 132 132';
+document.getElementById('cover-coach').innerHTML=svg('calm',FULL);
+document.getElementById('mood-calm').innerHTML=svg('calm',FULL);
+document.getElementById('mood-alarm').innerHTML=svg('alarmed',FULL);
+document.getElementById('mood-approve').innerHTML=svg('approving',FULL);
+document.getElementById('comp-coach').innerHTML=svg('calm',HEAD);
+</script>

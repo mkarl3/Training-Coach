@@ -12,7 +12,12 @@ CREATE TABLE IF NOT EXISTS season (
     start_date          TEXT NOT NULL,             -- ISO 'YYYY-MM-DD'; plan begins here
     weekly_hours_budget REAL NOT NULL,             -- real available hours/wk this season
     is_active           INTEGER NOT NULL DEFAULT 1, -- the season the dashboard/coach plan against
-    created_at          TEXT NOT NULL
+    created_at          TEXT NOT NULL,
+    -- no-event fallback (intake): when no goal_event is set, the athlete gives a general
+    -- DIRECTION. With no A-race date there is no peak/taper — this sets build EMPHASIS only
+    -- (open-ended base/build). Values are the generator's existing emphasis classes, validated
+    -- in app (no column CHECK): durability | sustained_threshold | anaerobic | balanced.
+    general_goal        TEXT                       -- nullable; appended to match the ALTER migration
 );
 
 -- Goal events. priority + type shape the build:
@@ -49,6 +54,23 @@ CREATE TABLE IF NOT EXISTS unavailable_period (
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_unavail_season ON unavailable_period(season_id);
+
+-- Historical life context (intake): injury/illness/newborn/travel tagged onto the PAST timeline.
+-- Distinct from unavailable_period (forward-looking) — the same real event may be recorded as both.
+-- Read by the watchman life-event findings modifier (slice2). detector_effect is decided at intake
+-- write time from `category`, then stored explicitly so the consumer stays dumb.
+CREATE TABLE IF NOT EXISTS life_event (
+    id              INTEGER PRIMARY KEY,
+    athlete_id      INTEGER NOT NULL DEFAULT 1,
+    start_date      TEXT NOT NULL,            -- ISO 'YYYY-MM-DD'
+    end_date        TEXT,                     -- NULL = point / ongoing
+    category        TEXT NOT NULL,            -- injury | illness | life | travel | equipment | other
+    note            TEXT,                     -- free text, coach only
+    detector_effect TEXT NOT NULL             -- annotate_only | downgrade_severity
+        CHECK (detector_effect IN ('annotate_only','downgrade_severity')),
+    created_at      TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_life_event_athlete ON life_event(athlete_id, start_date);
 
 -- Transient plan modifiers (Slice 4.5 — diary-driven). Each bends one or more weeks without
 -- touching the season's standing inputs: 'availability' overrides the weekly hours for a window

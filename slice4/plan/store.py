@@ -11,12 +11,30 @@ import sqlite3
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
 EVENT_TYPES = ("road_race_hilly", "road_race_flat", "time_trial", "gran_fondo",
                "criterium", "climbing_gc", "mixed")
+# No-event fallback direction (intake): the generator's existing emphasis classes. Validated in
+# app, not by a column CHECK (avoids the SQLite ALTER+CHECK edge case).
+GENERAL_GOALS = ("durability", "sustained_threshold", "anaerobic", "balanced")
+
+
+def _validate_general_goal(g):
+    if g is not None and g not in GENERAL_GOALS:
+        raise ValueError(f"general_goal must be one of {GENERAL_GOALS} or None")
 
 
 def init(conn):
     with open(SCHEMA_PATH, "r", encoding="utf-8") as fh:
         conn.executescript(fh.read())
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn):
+    """Idempotent column adds for DBs created before a column existed (CREATE IF NOT EXISTS
+    won't alter an existing table). JSON-free, additive, safe to run every startup."""
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(season)")]
+    if "general_goal" not in cols:
+        conn.execute("ALTER TABLE season ADD COLUMN general_goal TEXT")
+    conn.commit()
 
 
 def connect(db_path):
@@ -24,26 +42,30 @@ def connect(db_path):
 
 
 # --- seasons ---
-def create_season(conn, name, start_date, weekly_hours_budget, created_at, athlete_id=1):
+def create_season(conn, name, start_date, weekly_hours_budget, created_at, athlete_id=1,
+                  general_goal=None):
+    _validate_general_goal(general_goal)
     conn.execute("UPDATE season SET is_active=0 WHERE athlete_id=?", (athlete_id,))  # one active
     cur = conn.execute(
         "INSERT INTO season (athlete_id, name, start_date, weekly_hours_budget, is_active, "
-        "created_at) VALUES (?,?,?,?,1,?)",
-        (athlete_id, name, start_date, weekly_hours_budget, created_at))
+        "created_at, general_goal) VALUES (?,?,?,?,1,?,?)",
+        (athlete_id, name, start_date, weekly_hours_budget, created_at, general_goal))
     conn.commit()
     return cur.lastrowid
 
 
 def active_season(conn, athlete_id=1):
-    r = conn.execute("SELECT id, name, start_date, weekly_hours_budget FROM season "
+    r = conn.execute("SELECT id, name, start_date, weekly_hours_budget, general_goal FROM season "
                      "WHERE athlete_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
                      (athlete_id,)).fetchone()
-    return dict(zip(("id", "name", "start_date", "weekly_hours_budget"), r)) if r else None
+    return dict(zip(("id", "name", "start_date", "weekly_hours_budget", "general_goal"), r)) if r else None
 
 
 def update_season(conn, season_id, **fields):
-    allowed = {"name", "start_date", "weekly_hours_budget"}
+    allowed = {"name", "start_date", "weekly_hours_budget", "general_goal"}
     sets = {k: v for k, v in fields.items() if k in allowed}
+    if "general_goal" in sets:
+        _validate_general_goal(sets["general_goal"])
     if sets:
         conn.execute(f"UPDATE season SET {', '.join(f'{k}=?' for k in sets)} WHERE id=?",
                      (*sets.values(), season_id))
@@ -165,3 +187,6 @@ def undo_adjustment(conn, adjustment_id):
     conn.execute("UPDATE plan_adjustment SET active=0 WHERE id=?", (adjustment_id,))
     conn.commit()
     return adjustment_id
+
+# NOTE: the life_event TABLE is created here via schema.sql (plan_store.init), but its CRUD lives
+# in slice2/watchman/life_events.py next to load/apply_life_events for cohesion (handoff 2).

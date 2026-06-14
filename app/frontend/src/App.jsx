@@ -3,16 +3,60 @@ import Watchman from "./Watchman.jsx";
 import Coach from "./Coach.jsx";
 import Profile from "./Profile.jsx";
 import Calendar from "./Calendar.jsx";
+import Onboarding from "./Onboarding.jsx";
+import Wattson, { VB_HEAD, moodFromStatus } from "./Wattson.jsx";
+
+const RESTING_LINE = {
+  approving: "Numbers are where they should be. I'll yell if that changes.",
+  calm: "Let's see where you stand. Open me up when you're ready.",
+  alarmed: "Something's moving in your numbers. Let's talk.",
+};
+
+// Coach Wattson, always close at hand: a bottom dialogue bar (his portrait + mood + a line)
+// that opens the coach chat in a drawer over the full-screen dashboard.
+function CoachBar({ status, onOpen }) {
+  const mood = moodFromStatus(status);
+  return (
+    <button className="coachbar" onClick={onOpen} aria-label="Talk to Coach Wattson">
+      <div className="coachbar-port"><Wattson mood={mood} viewBox={VB_HEAD} /></div>
+      <div className="coachbar-txt">
+        <span className="who">Coach Wattson</span>
+        <p>{RESTING_LINE[mood]}</p>
+      </div>
+      <span className="coachbar-cue">▲ PRESS TO TALK</span>
+    </button>
+  );
+}
 
 export default function App() {
+  const [intake, setIntake] = useState(null);     // /api/intake/status; null = loading
   const [meta, setMeta] = useState(null);
   const [err, setErr] = useState(null);
   const [upload, setUpload] = useState({ state: "idle", msg: "" });
   const [dataKey, setDataKey] = useState(0); // bump to remount dashboard/coach after a refresh
   const [planKey, setPlanKey] = useState(0); // bump to remount ONLY the calendar (keeps chat alive)
   const [showProfile, setShowProfile] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
   const [view, setView] = useState("dashboard");  // "dashboard" | "calendar"
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await fetch(`/api/intake/status`).then((r) => r.json());
+        setIntake(st);
+        if (st.complete) setMeta(await fetch(`/api/meta`).then((r) => r.json()));
+      } catch (e) { setErr(String(e)); }
+    })();
+  }, []);
+
+  async function finishOnboarding() {
+    const [st, mt] = await Promise.all([
+      fetch(`/api/intake/status`).then((r) => r.json()),
+      fetch(`/api/meta`).then((r) => r.json()),
+    ]);
+    setIntake(st); setMeta(mt);
+  }
 
   async function refreshAfterProfile() {
     const mt = await fetch(`/api/meta`).then((r) => r.json());
@@ -21,19 +65,15 @@ export default function App() {
     setShowProfile(false);
   }
 
-  useEffect(() => {
-    fetch(`/api/meta`).then((r) => r.json()).then(setMeta).catch((e) => setErr(String(e)));
-  }, []);
-
   async function onFile(e) {
-    const f = e.target.files?.[0];
+    const arr = [...(e.target.files || [])];
     e.target.value = "";
-    if (!f) return;
-    setUpload({ state: "busy", msg: `Ingesting ${f.name}…` });
+    if (!arr.length) return;
+    setUpload({ state: "busy", msg: `Ingesting ${arr.length > 1 ? arr.length + " files" : arr[0].name}…` });
     try {
       const body = new FormData();
-      body.append("file", f);
-      const res = await fetch(`/api/upload`, { method: "POST", body });
+      arr.forEach((f) => body.append("files", f));
+      const res = await fetch(`/api/upload`, { method: "POST", body });   // incremental: no 12mo minimum
       const out = await res.json();
       if (!res.ok) throw new Error(out.detail || "upload failed");
       const mt = await fetch(`/api/meta`).then((r) => r.json());
@@ -49,51 +89,68 @@ export default function App() {
   if (err)
     return (
       <div className="shell">
-        <div className="appbar"><h1>Training Coach</h1></div>
+        <div className="appbar"><h1 className="wordmark">WATT SMITH</h1></div>
         <p className="err">API error: {err}. Is the backend running on :8000?</p>
       </div>
     );
+  if (intake === null)
+    return (
+      <div className="shell">
+        <div className="appbar"><h1 className="wordmark">WATT SMITH</h1></div>
+        <p style={{ color: "var(--ink-2)", padding: 14 }}>Loading…</p>
+      </div>
+    );
+
+  if (!intake.complete)
+    return <Onboarding initialStatus={intake} onComplete={finishOnboarding} />;
+
   if (!meta)
     return (
       <div className="shell">
-        <div className="appbar"><h1>Training Coach</h1></div>
-        <p style={{ color: "var(--muted)", padding: 14 }}>Loading…</p>
+        <div className="appbar"><h1 className="wordmark">WATT SMITH</h1></div>
+        <p style={{ color: "var(--ink-2)", padding: 14 }}>Loading…</p>
       </div>
     );
 
   return (
     <div className="shell">
       <div className="appbar">
-        <h1>
-          Training Coach <small>data through {meta.date_max}</small>
-        </h1>
+        <h1 className="wordmark">WATT SMITH <small>data through {meta.date_max}</small></h1>
         <div className="tabs">
           <button className={view === "dashboard" ? "tab on" : "tab"} onClick={() => setView("dashboard")}>Dashboard</button>
           <button className={view === "calendar" ? "tab on" : "tab"} onClick={() => setView("calendar")}>Calendar</button>
         </div>
         <div className="appbar-actions">
           {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
-          <input type="file" accept=".xlsx" ref={fileRef} onChange={onFile}
-            style={{ display: "none" }} />
+          <input type="file" accept=".xlsx" multiple ref={fileRef} onChange={onFile} style={{ display: "none" }} />
           <button className="update-btn" onClick={() => setShowProfile(true)}>⚙ Profile</button>
-          <button className="update-btn" disabled={upload.state === "busy"}
-            onClick={() => fileRef.current?.click()}>
-            {upload.state === "busy" ? "Updating…" : "↑ Update training data"}
+          <button className="update-btn" disabled={upload.state === "busy"} onClick={() => fileRef.current?.click()}>
+            {upload.state === "busy" ? "Updating…" : "↑ Load data"}
           </button>
           <span className={"pill " + meta.board_status}>{meta.board_status}</span>
         </div>
       </div>
+
       {showProfile && <Profile onClose={() => setShowProfile(false)} onSaved={refreshAfterProfile} />}
-      <div className="cols">
-        <div className="left">
-          {view === "dashboard"
-            ? <Watchman key={"w" + dataKey} meta={meta} />
-            : <Calendar key={"cal" + dataKey + "-" + planKey} />}
-        </div>
-        <div className="right">
-          <Coach key={"c" + dataKey} meta={meta} onPlanChanged={() => setPlanKey((k) => k + 1)} />
-        </div>
+
+      <div className="main">
+        {view === "dashboard"
+          ? <Watchman key={"w" + dataKey} meta={meta} />
+          : <Calendar key={"cal" + dataKey + "-" + planKey} />}
       </div>
+
+      <CoachBar status={meta.board_status} onOpen={() => setCoachOpen(true)} />
+
+      {coachOpen && (
+        <>
+          <div className="coach-scrim" onClick={() => setCoachOpen(false)} />
+          <div className="coach-drawer">
+            <Coach key={"c" + dataKey} meta={meta}
+              onPlanChanged={() => setPlanKey((k) => k + 1)}
+              onClose={() => setCoachOpen(false)} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

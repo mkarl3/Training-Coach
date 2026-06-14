@@ -66,7 +66,7 @@ class Coach:
     """Wires retrieval + findings + notes + memory into per-turn LLM calls."""
 
     def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT,
-                 profile=None, plan_summary=None, soft_advisories=None):
+                 profile=None, plan_summary=None, soft_advisories=None, weekly_briefing=None):
         import anthropic
         from wko_metrics import DEFAULT_PROFILE
         self.conn = conn                      # coach.db (notes + conversations)
@@ -83,6 +83,9 @@ class Coach:
         # Recurring subjective themes (slice4.5 step 3), as soft context. STRICTLY non-binding:
         # the coach may acknowledge these; it must NEVER change a plan number because of them.
         self.soft_advisories = soft_advisories
+        # This week's deterministic briefing (slice4.5 weekly check-in) — set when a check-in is
+        # opened; the coach narrates it, never recomputes it.
+        self.weekly_briefing = weekly_briefing
 
     # ---- context assembly (the structural guarantee lives here) ----
     def _retrieve(self, question):
@@ -123,8 +126,10 @@ class Coach:
         themes = (f"RECURRING CHECK-IN THEMES (soft signals — acknowledge them, but they must "
                   f"NEVER change a plan number; only hard facts feed a recompute):\n"
                   f"{self.soft_advisories}\n\n" if self.soft_advisories else "")
+        briefing = (f"THIS WEEK'S BRIEFING (deterministic — narrate it, do NOT recompute these "
+                    f"numbers):\n{self.weekly_briefing}\n\n" if self.weekly_briefing else "")
         return (f"ATHLETE PROFILE (fixed facts):\n{self._profile_context(as_of)}\n\n"
-                f"{calendar}{themes}"
+                f"{briefing}{calendar}{themes}"
                 f"FINDINGS (deterministic, as of {as_of}):\n"
                 f"{_findings_context(self.watch_state, self.ranked_confirmed)}\n\n"
                 f"METHODOLOGY (retrieved for this question, corpus v{self.index.version}):\n{meth}\n\n"
@@ -161,3 +166,29 @@ class Coach:
             "notes_rejected": len(rejected),
             "methodology_used": [{"doc": c["doc"], "score": c["score"]} for c in chunks],
         }
+
+    # ---- intake first-read (grounded; writes nothing, computes nothing) ----
+    def first_read(self, as_of, season_goal=None):
+        """Coach Wattson's first read on a new athlete. Reuses the SAME grounded context the
+        check-in turn builds (findings + profile + season + retrieved methodology); seeds it with
+        a fixed first-read instruction. Read-only — no capture, no plan write, no metric. If the
+        FINDINGS are thin it soft-fallbacks instead of asserting a pattern that isn't there."""
+        context, chunks = self._build_turn_context(
+            "season readiness overview: fitness CTL, fatigue ATL, form TSB, and this athlete's "
+            "characteristic failure pattern (spike-then-crash, gaps, durability)", as_of, conv_id=None)
+        if season_goal:
+            context += (f"\n\nSEASON DIRECTION (general goal — no dated A-race yet, so there is no "
+                        f"plan to explain): {season_goal}")
+        instruction = (
+            "This is your FIRST read on a new athlete — you've just seen their history for the "
+            "first time. Introduce yourself in one line as Coach Wattson, then give them the read: "
+            "how much history you can see, the characteristic pattern the FINDINGS show, and any "
+            "active flags — number-first, in your voice. If the FINDINGS are thin or absent, say "
+            "plainly there isn't enough history to call a pattern yet — do NOT invent one. A few "
+            "tight lines, not an essay.")
+        response = self.client.messages.create(
+            model=self.cfg.model, max_tokens=self.cfg.max_tokens, system=SYSTEM,
+            messages=[{"role": "user", "content": f"<context>\n{context}\n</context>\n\n{instruction}"}])
+        reply = next((b.text for b in response.content if b.type == "text"), "")
+        return {"reply": reply,
+                "methodology_used": [{"doc": c["doc"], "score": c["score"]} for c in chunks]}

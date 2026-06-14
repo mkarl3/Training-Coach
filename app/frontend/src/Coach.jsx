@@ -35,7 +35,57 @@ const KIND_LABEL = {
   hard_capacity_change: "Keep it easy",
 };
 
-export default function Coach({ meta, onPlanChanged }) {
+function pmcBit(label, p) {
+  if (p?.now == null) return null;
+  const d = p.delta_7d;
+  return (
+    <span className="pmc-bit">
+      {label} <b>{p.now}</b>
+      {d != null && <span className={"pmc-d " + (p.dir_7d || "flat")}>{d > 0 ? "+" : ""}{d}/7d</span>}
+    </span>
+  );
+}
+
+function BriefingCard({ b }) {
+  if (!b || !b.week_reviewed || !b.pmc) return null;   // never crash the chat on a bad payload
+  const wr = b.week_reviewed;
+  const nw = b.next_week;
+  return (
+    <div className="briefing">
+      <div className="briefing-head">
+        <b>Weekly Check-In</b>
+        <span className="muted">data through {b.as_of}</span>
+        <span className={"pill " + b.status}>{b.status}</span>
+      </div>
+      <div className="briefing-row">
+        {wr.planned_tss != null
+          ? <>Week just closed{wr.block ? ` (${wr.block.block})` : ""}: did <b>{wr.actual_tss}</b> of{" "}
+            <b>{wr.planned_tss}</b> TSS planned <span className={"comp " + (wr.compliance_pct >= 90 ? "ok" : "lo")}>· {wr.compliance_pct}%</span></>
+          : <>Last 7 days: <b>{wr.actual_tss}</b> TSS <span className="muted">(prior week {wr.prior_week_tss})</span></>}
+      </div>
+      <div className="briefing-row pmc">
+        {pmcBit("CTL", b.pmc.ctl)}{pmcBit("ATL", b.pmc.atl)}{pmcBit("TSB", b.pmc.tsb)}
+      </div>
+      {nw && (
+        <div className="briefing-row next">
+          <span className="tag">Next</span> wk{nw.week} {nw.block}
+          {nw.is_recovery ? " (recovery)" : nw.intensity_capped ? " (easy/capped)" : ""}: {" "}
+          <b>{nw.weekly_tss_target}</b> TSS · single-ride ≤{nw.single_ride_tss_cap} · ~{nw.est_hours}h
+          {nw.field_test && <span className="ft-tag"> ⚑ field test</span>}
+        </div>
+      )}
+      {b.themes?.length > 0 && (
+        <div className="briefing-row themes-inline">
+          <span className="muted">Recurring:</span>
+          {b.themes.map((t) => <span className="theme-chip" key={t.category}>{t.label} ×{t.checkins}</span>)}
+        </div>
+      )}
+      <div className="briefing-row prompt muted">How did the week go? Tell me how training felt.</div>
+    </div>
+  );
+}
+
+export default function Coach({ meta, onPlanChanged, onClose }) {
   const [convId, setConvId] = useState(meta.latest_conversation_id);
   const [msgs, setMsgs] = useState([]);
   const [draft, setDraft] = useState("");
@@ -70,6 +120,21 @@ export default function Coach({ meta, onPlanChanged }) {
     onPlanChanged?.();
   }
   const dismiss = (p) => setCards((c) => ({ ...c, [p.id]: { status: "dismissed" } }));
+
+  async function startWeeklyCheckin() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/coach/weekly-briefing`);
+      const b = await r.json();
+      if (!r.ok || !b.week_reviewed) throw new Error(b.detail || "briefing unavailable");
+      setMsgs((m) => [...m, { role: "briefing", briefing: b }]);
+    } catch {
+      setMsgs((m) => [...m, { role: "assistant", content: "(couldn't load this week's briefing)" }]);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     if (!meta.latest_conversation_id) return;
@@ -116,8 +181,14 @@ export default function Coach({ meta, onPlanChanged }) {
   return (
     <>
       <div className="chat-head">
-        <b>Coach</b>
-        <span>weekly check-in · what you report is saved as dated notes</span>
+        <div>
+          <b>Coach Wattson</b>
+          <span>weekly check-in · what you report is saved as dated notes</span>
+        </div>
+        <div className="head-actions">
+          <button className="weekly-btn" onClick={startWeeklyCheckin} disabled={busy}>Weekly Check-In</button>
+          {onClose && <button className="chat-close" onClick={onClose} aria-label="Close">▼</button>}
+        </div>
       </div>
       {themes.length > 0 && (
         <div className="themes" title="Recurring in your check-ins — context for the coach, not a plan change">
@@ -138,7 +209,9 @@ export default function Coach({ meta, onPlanChanged }) {
         )}
         {msgs.map((m, i) => (
           <React.Fragment key={i}>
-            <div className={"msg " + m.role}>{md(m.content)}</div>
+            {m.role === "briefing"
+              ? <BriefingCard b={m.briefing} />
+              : <div className={"msg " + m.role}>{md(m.content)}</div>}
             {m.role === "assistant" && (m.captured?.length || m.sources?.length) ? (
               <div className="meta-row">
                 {m.captured?.map((n, j) => (
