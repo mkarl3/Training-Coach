@@ -33,6 +33,8 @@ class AthleteProfile:
     birth_year: int | None = None
     units: str = "imperial"                       # "imperial" (mi/lb) | "metric"
     week_starts_on: str = "monday"                # "monday" | "sunday" — drives calendar weeks
+    weight_kg: float | None = None                # current weight (kg). v1 DISPLAY-ONLY — captured
+                                                  # but not consumed by any metric yet (like ramp_rate_cap)
     # NOTE: weekly availability is NOT here — it lives on the season (slice4), because real
     # available hours change season to season. The generator reads it from the active season.
 
@@ -79,7 +81,7 @@ class AthleteProfile:
         "fragile_gap_confirmed_w", "acwr_min_acute_load", "acwr_min_chronic_load",
         "monotony_band_frac", "tiz_concentration_watch", "detraining_pctile",
     )
-    FIXED_FACT_FIELDS = ("name", "birth_year", "units", "week_starts_on")
+    FIXED_FACT_FIELDS = ("name", "birth_year", "units", "week_starts_on", "weight_kg")
 
 
 DEFAULT_PROFILE = AthleteProfile()

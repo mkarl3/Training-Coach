@@ -173,3 +173,29 @@ class Coach:
             "notes_rejected": len(rejected),
             "methodology_used": [{"doc": c["doc"], "score": c["score"]} for c in chunks],
         }
+
+    # ---- intake first-read (grounded; writes nothing, computes nothing) ----
+    def first_read(self, as_of, season_goal=None):
+        """Coach Wattson's first read on a new athlete. Reuses the SAME grounded context the
+        check-in turn builds (findings + profile + season + retrieved methodology); seeds it with
+        a fixed first-read instruction. Read-only — no capture, no plan write, no metric. If the
+        FINDINGS are thin it soft-fallbacks instead of asserting a pattern that isn't there."""
+        context, chunks = self._build_turn_context(
+            "season readiness overview: fitness CTL, fatigue ATL, form TSB, and this athlete's "
+            "characteristic failure pattern (spike-then-crash, gaps, durability)", as_of, conv_id=None)
+        if season_goal:
+            context += (f"\n\nSEASON DIRECTION (general goal — no dated A-race yet, so there is no "
+                        f"plan to explain): {season_goal}")
+        instruction = (
+            "This is your FIRST read on a new athlete — you've just seen their history for the "
+            "first time. Introduce yourself in one line as Coach Wattson, then give them the read: "
+            "how much history you can see, the characteristic pattern the FINDINGS show, and any "
+            "active flags — number-first, in your voice. If the FINDINGS are thin or absent, say "
+            "plainly there isn't enough history to call a pattern yet — do NOT invent one. A few "
+            "tight lines, not an essay.")
+        response = self.client.messages.create(
+            model=self.cfg.model, max_tokens=self.cfg.max_tokens, system=SYSTEM,
+            messages=[{"role": "user", "content": f"<context>\n{context}\n</context>\n\n{instruction}"}])
+        reply = next((b.text for b in response.content if b.type == "text"), "")
+        return {"reply": reply,
+                "methodology_used": [{"doc": c["doc"], "score": c["score"]} for c in chunks]}

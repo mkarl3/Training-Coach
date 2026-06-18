@@ -3,26 +3,22 @@ import Watchman from "./Watchman.jsx";
 import Coach from "./Coach.jsx";
 import Profile from "./Profile.jsx";
 import Calendar from "./Calendar.jsx";
-import CoachWattson, { moodFor } from "./CoachWattson.jsx";
+import Onboarding from "./Onboarding.jsx";
+import Wattson, { VB_HEAD, moodFromStatus } from "./Wattson.jsx";
 
 const RESTING_LINE = {
-  calm: "Numbers are where they should be. I'll yell if that changes.",
-  approving: "That's how you do it. Keep it rolling — don't get greedy.",
+  approving: "Numbers are where they should be. I'll yell if that changes.",
+  calm: "Let's see where you stand. Open me up when you're ready.",
   alarmed: "Something's moving in your numbers. Let's talk.",
 };
 
-// The always-present bottom bar: Wattson's portrait (mood = board state), his latest line,
-// and a press-start cue. Click anywhere to open the dialogue drawer.
+// Coach Wattson, always close at hand: a bottom dialogue bar (his portrait + mood + a line)
+// that opens the coach chat in a drawer over the full-screen dashboard.
 function CoachBar({ status, onOpen }) {
-  const [brief, setBrief] = useState(null);
-  useEffect(() => {
-    fetch("/api/coach/weekly-briefing").then((r) => r.json()).then(setBrief).catch(() => {});
-  }, []);
-  const rising = brief?.pmc?.ctl?.dir_7d === "up";
-  const mood = moodFor(brief?.status || status, rising);
+  const mood = moodFromStatus(status);
   return (
     <button className="coachbar" onClick={onOpen} aria-label="Talk to Coach Wattson">
-      <div className="coachbar-port"><CoachWattson mood={mood} variant="head" /></div>
+      <div className="coachbar-port"><Wattson mood={mood} viewBox={VB_HEAD} /></div>
       <div className="coachbar-txt">
         <span className="who">Coach Wattson</span>
         <p>{RESTING_LINE[mood]}</p>
@@ -33,6 +29,7 @@ function CoachBar({ status, onOpen }) {
 }
 
 export default function App() {
+  const [intake, setIntake] = useState(null);     // /api/intake/status; null = loading
   const [meta, setMeta] = useState(null);
   const [err, setErr] = useState(null);
   const [upload, setUpload] = useState({ state: "idle", msg: "" });
@@ -43,6 +40,24 @@ export default function App() {
   const [view, setView] = useState("dashboard");  // "dashboard" | "calendar"
   const fileRef = useRef(null);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const st = await fetch(`/api/intake/status`).then((r) => r.json());
+        setIntake(st);
+        if (st.complete) setMeta(await fetch(`/api/meta`).then((r) => r.json()));
+      } catch (e) { setErr(String(e)); }
+    })();
+  }, []);
+
+  async function finishOnboarding() {
+    const [st, mt] = await Promise.all([
+      fetch(`/api/intake/status`).then((r) => r.json()),
+      fetch(`/api/meta`).then((r) => r.json()),
+    ]);
+    setIntake(st); setMeta(mt);
+  }
+
   async function refreshAfterProfile() {
     const mt = await fetch(`/api/meta`).then((r) => r.json());
     setMeta(mt);
@@ -50,19 +65,15 @@ export default function App() {
     setShowProfile(false);
   }
 
-  useEffect(() => {
-    fetch(`/api/meta`).then((r) => r.json()).then(setMeta).catch((e) => setErr(String(e)));
-  }, []);
-
   async function onFile(e) {
-    const f = e.target.files?.[0];
+    const arr = [...(e.target.files || [])];
     e.target.value = "";
-    if (!f) return;
-    setUpload({ state: "busy", msg: `Ingesting ${f.name}…` });
+    if (!arr.length) return;
+    setUpload({ state: "busy", msg: `Ingesting ${arr.length > 1 ? arr.length + " files" : arr[0].name}…` });
     try {
       const body = new FormData();
-      body.append("file", f);
-      const res = await fetch(`/api/upload`, { method: "POST", body });
+      arr.forEach((f) => body.append("files", f));
+      const res = await fetch(`/api/upload`, { method: "POST", body });   // incremental: no 12mo minimum
       const out = await res.json();
       if (!res.ok) throw new Error(out.detail || "upload failed");
       const mt = await fetch(`/api/meta`).then((r) => r.json());
@@ -78,14 +89,25 @@ export default function App() {
   if (err)
     return (
       <div className="shell">
-        <div className="appbar"><h1>WATT SMITH</h1></div>
+        <div className="appbar"><h1 className="wordmark">WATT SMITH</h1></div>
         <p className="err">API error: {err}. Is the backend running on :8000?</p>
       </div>
     );
+  if (intake === null)
+    return (
+      <div className="shell">
+        <div className="appbar"><h1 className="wordmark">WATT SMITH</h1></div>
+        <p style={{ color: "var(--ink-2)", padding: 14 }}>Loading…</p>
+      </div>
+    );
+
+  if (!intake.complete)
+    return <Onboarding initialStatus={intake} onComplete={finishOnboarding} />;
+
   if (!meta)
     return (
       <div className="shell">
-        <div className="appbar"><h1>WATT SMITH</h1></div>
+        <div className="appbar"><h1 className="wordmark">WATT SMITH</h1></div>
         <p style={{ color: "var(--ink-2)", padding: 14 }}>Loading…</p>
       </div>
     );
@@ -93,14 +115,14 @@ export default function App() {
   return (
     <div className="shell">
       <div className="appbar">
-        <h1>WATT SMITH <small>data through {meta.date_max}</small></h1>
+        <h1 className="wordmark">WATT SMITH <small>data through {meta.date_max}</small></h1>
         <div className="tabs">
           <button className={view === "dashboard" ? "tab on" : "tab"} onClick={() => setView("dashboard")}>Dashboard</button>
           <button className={view === "calendar" ? "tab on" : "tab"} onClick={() => setView("calendar")}>Calendar</button>
         </div>
         <div className="appbar-actions">
           {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
-          <input type="file" accept=".xlsx" ref={fileRef} onChange={onFile} style={{ display: "none" }} />
+          <input type="file" accept=".xlsx" multiple ref={fileRef} onChange={onFile} style={{ display: "none" }} />
           <button className="update-btn" onClick={() => setShowProfile(true)}>⚙ Profile</button>
           <button className="update-btn" disabled={upload.state === "busy"} onClick={() => fileRef.current?.click()}>
             {upload.state === "busy" ? "Updating…" : "↑ Load data"}
@@ -117,7 +139,7 @@ export default function App() {
           : <Calendar key={"cal" + dataKey + "-" + planKey} />}
       </div>
 
-      <CoachBar key={"bar" + dataKey + "-" + planKey} status={meta.board_status} onOpen={() => setCoachOpen(true)} />
+      <CoachBar status={meta.board_status} onOpen={() => setCoachOpen(true)} />
 
       {coachOpen && (
         <>

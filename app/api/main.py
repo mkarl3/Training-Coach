@@ -12,7 +12,7 @@ import os
 import sqlite3
 import sys
 
-from fastapi import FastAPI, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -22,7 +22,9 @@ for p in ("slice4", "slice3", "slice2", "slice1", "slice0"):
     sys.path.insert(0, os.path.join(ROOT, p))
 
 from wko_metrics import metrics, detectors, profile, AthleteProfile, DEFAULT_PROFILE  # noqa: E402
-from watchman import select, DEFAULT_SELECTION         # noqa: E402
+from watchman import (select, DEFAULT_SELECTION, apply_life_events, load_life_events,  # noqa: E402
+                      add_life_event, list_life_events, delete_life_event,
+                      LIFE_EVENT_CATEGORIES, LIFE_EVENT_EFFECTS)
 from wko_ingest import loader, validator               # noqa: E402
 from coach import store, capture as coach_capture     # noqa: E402
 from coach.orchestrator import Coach                   # noqa: E402
@@ -89,16 +91,42 @@ def _plan_summary(plan):
     return "\n".join(lines)
 
 
+def _has_training_data():
+    """True only when wko.db exists AND holds actual (non-projected) daily rows. Cold start
+    (no file / empty DB) is tolerated — the app degrades to an 'awaiting intake' state."""
+    if not os.path.exists(WKO_DB):
+        return False
+    try:
+        c = sqlite3.connect(WKO_DB)
+        n = c.execute("SELECT count(*) FROM daily WHERE is_projected=0").fetchone()[0]
+        c.close()
+        return n > 0
+    except sqlite3.OperationalError:
+        return False
+
+
 def _load_training_data():
     """(Re)build the in-memory dashboard + coach from the current wko.db, using the loaded
     AthleteProfile for all athlete-relative constants. The coach.db connection (conversation
-    history + the profile row) is opened once and reused across refreshes."""
+    history + the profile row) is opened once and reused across refreshes. Tolerant of a missing
+    dataset: on cold start it degrades to an 'awaiting intake' state instead of crashing."""
     conn = _S.get("conn") or store.connect(COACH_DB)
     plan_store.init(conn)                             # ensure season tables exist in coach.db
     prof = _S.get("profile") or profile.load_profile(conn)
 
+    if not _has_training_data():
+        # awaiting intake — no metrics/findings/plan/coach yet; keep conn + profile so the intake
+        # write paths (profile, season, life-event, upload) still work.
+        _S.update(m=None, findings=[], as_of=None, status="awaiting", conn=conn, profile=prof,
+                  season=plan_store.active_season(conn), plan=None, coach=None, date_min=None)
+        _S.setdefault("pending", {})
+        _S.setdefault("pending_seq", 0)
+        return
+
     m = metrics.Metrics(sqlite3.connect(WKO_DB, check_same_thread=False), profile=prof)
-    findings = detectors.run_all(m)
+    # life events (intake) explain/quiet overlapping findings BEFORE selection. `conn` is the
+    # season-layer DB (coach.db) where plan_store.init created the life_event table.
+    findings = apply_life_events(detectors.run_all(m), load_life_events(conn))
     as_of = m.daily.index.max().strftime("%Y-%m-%d")
     watch_now = select(findings, as_of, m)
 
@@ -150,10 +178,43 @@ def _startup():
     _load_training_data()
 
 
+# ---------------- intake status ----------------
+def _require_loaded():
+    """409 when there's no dataset (cold start) — for endpoints that need metrics/findings."""
+    if _S.get("m") is None:
+        raise HTTPException(409, "awaiting intake — no training data loaded yet")
+
+
+def _months_of_history():
+    if _S.get("m") is None or _S.get("date_min") is None or _S.get("as_of") is None:
+        return 0.0
+    span = (datetime.date.fromisoformat(_S["as_of"]) - datetime.date.fromisoformat(_S["date_min"])).days
+    return round(span / 30.44, 1)
+
+
+@app.get("/api/intake/status")
+def intake_status():
+    """Booleans + counts the frontend reads to choose onboarding vs the dashboard."""
+    prof = _S.get("profile")
+    has_data = _S.get("m") is not None
+    months = _months_of_history()
+    has_profile = bool(prof and prof.birth_year is not None)   # age/masters depend on birth_year
+    season = plan_store.active_season(_S["conn"]) if _S.get("conn") else None
+    has_goal = bool(season and (plan_store.events_for(_S["conn"], season["id"])
+                                or season.get("general_goal")))
+    return {
+        "has_data": has_data,
+        "months_of_history": months,
+        "has_profile": has_profile,
+        "has_season_or_goal": has_goal,
+        "complete": bool(has_data and months >= 12 and has_profile),
+    }
+
+
 # ---------------- watchman ----------------
 @app.get("/api/meta")
 def meta():
-    last = store.latest_conversation(_S["conn"])
+    last = store.latest_conversation(_S["conn"]) if _S.get("conn") else None
     return {"date_min": _S["date_min"], "date_max": _S["as_of"],
             "default_as_of": _S["as_of"], "board_status": _S["status"],
             "latest_conversation_id": last[0] if last else None}
@@ -161,6 +222,7 @@ def meta():
 
 @app.get("/api/watchman")
 def watchman(as_of: str = Query(...), window: int = Query(120, ge=14, le=400)):
+    _require_loaded()
     if not (_S["date_min"] <= as_of <= _S["as_of"]):
         raise HTTPException(400, f"as_of must be in [{_S['date_min']}, {_S['as_of']}]")
     scfg = dataclasses.replace(DEFAULT_SELECTION, trajectory_window_days=window)
@@ -315,6 +377,7 @@ def _propose(text):
 
 @app.post("/api/coach/message")
 def message(body: MessageIn):
+    _require_loaded()
     now = datetime.datetime.now().replace(microsecond=0).isoformat()
     cid = body.conversation_id or store.start_conversation(_S["conn"], _S["as_of"], now)
     # 1. Diary-driven adjustment is PROPOSE-ONLY: classify the message and, for hard constraints
@@ -356,7 +419,19 @@ def _weekly_briefing():
 
 @app.get("/api/coach/weekly-briefing")
 def weekly_briefing():
+    _require_loaded()
     return _weekly_briefing()
+
+
+@app.post("/api/coach/first-read")
+def first_read():
+    """Coach Wattson's grounded first read on the loaded dataset — the intake validation
+    checkpoint. Reuses the orchestrator's grounded context; writes nothing, computes nothing.
+    general_goal (if set) reaches the read even when no dated plan exists."""
+    _require_loaded()
+    season = plan_store.active_season(_S["conn"])
+    goal = season.get("general_goal") if season else None
+    return _S["coach"].first_read(_S["as_of"], season_goal=goal)
 
 
 class ConfirmIn(BaseModel):
@@ -408,6 +483,7 @@ class SeasonIn(BaseModel):
     name: str
     start_date: str
     weekly_hours_budget: float
+    general_goal: str | None = None      # no-event direction (emphasis only); validated in store
 
 
 class EventIn(BaseModel):
@@ -437,15 +513,23 @@ def get_season():
 @app.post("/api/season")
 def upsert_season(body: SeasonIn):
     now = datetime.datetime.now().replace(microsecond=0).isoformat()
-    s = _S.get("season")
-    if s:
-        plan_store.update_season(_S["conn"], s["id"], name=body.name, start_date=body.start_date,
-                                 weekly_hours_budget=body.weekly_hours_budget)
+    s = plan_store.active_season(_S["conn"])          # don't rely on _S in the awaiting state
+    try:
+        if s:
+            plan_store.update_season(_S["conn"], s["id"], name=body.name, start_date=body.start_date,
+                                     weekly_hours_budget=body.weekly_hours_budget,
+                                     general_goal=body.general_goal)
+        else:
+            plan_store.create_season(_S["conn"], body.name, body.start_date,
+                                     body.weekly_hours_budget, now, general_goal=body.general_goal)
+    except ValueError as e:                            # invalid general_goal -> 400
+        raise HTTPException(400, str(e))
+    # recompute when data is loaded; in the awaiting state just refresh the cached season.
+    if _S.get("m") is not None:
+        _refresh_plan()
     else:
-        plan_store.create_season(_S["conn"], body.name, body.start_date,
-                                 body.weekly_hours_budget, now)
-    _refresh_plan()
-    return {"ok": True, "plan": _S["plan"]}
+        _S["season"] = plan_store.active_season(_S["conn"])
+    return {"ok": True, "plan": _S.get("plan")}
 
 
 @app.post("/api/season/event")
@@ -494,34 +578,97 @@ def get_plan():
     return _S.get("plan") or {"error": "no active season — add one to generate a plan"}
 
 
-# ---------------- data import ----------------
-@app.post("/api/upload")
-async def upload(file: UploadFile):
-    """Ingest a new WKO5 export, then hot-reload. Safe: rebuilds to a temp DB and validates
-    BEFORE committing — a bad file is rejected and the live dataset is left untouched."""
-    name = os.path.basename(file.filename or "")
-    if not name.lower().endswith(".xlsx"):
-        raise HTTPException(400, "Please upload a WKO5 .xlsx export.")
-    if loader._classify(name) == "?":
-        raise HTTPException(400, "Filename not recognized. Expected one starting with "
-                                 "'Training History', 'PMC Report', 'Daily TiZ', or 'Week of'.")
-    data = await file.read()
-    try:
-        import openpyxl
-        wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
-        sheets = [ws.title for ws in wb.worksheets]
-        wb.close()
-    except Exception:
-        raise HTTPException(400, "That file isn't a readable Excel workbook.")
+# ---------------- life events (historical context tagged at intake) ----------------
+class LifeEventIn(BaseModel):
+    start_date: str
+    end_date: str | None = None
+    category: str
+    note: str | None = None
+    detector_effect: str | None = None
 
+
+@app.get("/api/life-event")
+def get_life_events():
+    return {"life_events": list_life_events(_S["conn"])}
+
+
+@app.post("/api/life-event")
+def post_life_event(body: LifeEventIn):
+    if body.category not in LIFE_EVENT_CATEGORIES:
+        raise HTTPException(400, f"category must be one of {LIFE_EVENT_CATEGORIES}")
+    if body.detector_effect is not None and body.detector_effect not in LIFE_EVENT_EFFECTS:
+        raise HTTPException(400, f"detector_effect must be one of {LIFE_EVENT_EFFECTS}")
+    now = datetime.datetime.now().replace(microsecond=0).isoformat()
+    eid = add_life_event(_S["conn"], body.start_date, body.category, now,
+                         end_date=body.end_date, note=body.note,
+                         detector_effect=body.detector_effect)
+    _load_training_data()                             # re-apply the findings pre-pass -> board updates
+    return {"ok": True, "id": eid, "board_status": _S["status"]}
+
+
+@app.delete("/api/life-event/{event_id}")
+def del_life_event(event_id: int):
+    delete_life_event(_S["conn"], event_id)
+    _load_training_data()
+    return {"ok": True, "board_status": _S["status"]}
+
+
+# ---------------- data import ----------------
+def _rollback_uploads(written):
+    """Undo the files written this request: remove each new file and restore any it replaced."""
+    for dest, backup, _ in written:
+        if os.path.exists(dest):
+            os.remove(dest)
+        if backup and os.path.exists(backup):
+            os.replace(backup, dest)
+
+
+@app.post("/api/upload")
+async def upload(files: list[UploadFile] = File(...), intake: bool = Query(False)):
+    """Ingest one or MORE WKO5 exports, then hot-reload. Safe: writes all the files, rebuilds to
+    a temp DB and validates BEFORE committing — if anything is wrong the whole batch is rolled
+    back and the live dataset is left untouched. intake=True additionally enforces a >=12-month
+    history minimum on the rebuilt dataset (first-run onboarding); intake=False (default,
+    incremental updates) keeps the unchanged no-minimum behavior."""
+    if not files:
+        raise HTTPException(400, "No files provided.")
     os.makedirs(EXPORTS_DIR, exist_ok=True)
-    dest = os.path.join(EXPORTS_DIR, name)
-    backup = dest + ".bak" if os.path.exists(dest) else None
-    if backup:
-        os.replace(dest, backup)
-    with open(dest, "wb") as fh:
-        fh.write(data)
-    os.utime(dest, None)                              # fresh mtime -> newer file wins on overlap
+    written = []                                      # (dest, backup_or_None, name)
+    all_sheets = set()
+    try:
+        for f in files:
+            name = os.path.basename(f.filename or "")
+            if not name.lower().endswith(".xlsx"):
+                raise HTTPException(400, f"{name or 'a file'}: please upload WKO5 .xlsx exports.")
+            data = await f.read()
+            try:                                      # classify by CONTENT — any filename is fine
+                import openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True)
+                fams = set()
+                for ws in wb.worksheets:
+                    all_sheets.add(ws.title)
+                    sf = loader.classify_sheet(loader.header_map(ws)[0])
+                    if sf:
+                        fams.add(sf)
+                wb.close()
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(400, f"{name}: that isn't a readable Excel workbook.")
+            if not fams:
+                raise HTTPException(400, f"{name}: doesn't look like a WKO5 export — no Training "
+                                         "History, PMC, or Daily TiZ columns found in it.")
+            dest = os.path.join(EXPORTS_DIR, name)
+            backup = dest + ".bak" if os.path.exists(dest) else None
+            if backup:
+                os.replace(dest, backup)
+            with open(dest, "wb") as fh:
+                fh.write(data)
+            os.utime(dest, None)                      # fresh mtime -> newer file wins on overlap
+            written.append((dest, backup, name))
+    except HTTPException:
+        _rollback_uploads(written)                    # restore any files written before the bad one
+        raise
 
     now = datetime.datetime.now().replace(microsecond=0).isoformat()
     tmp = WKO_DB + ".tmp"
@@ -531,26 +678,35 @@ async def upload(file: UploadFile):
         if not report["round_trip_ok"]:
             fails = [n for n, ok, _ in report["round_trip"] if not ok]
             raise RuntimeError("round-trip checks failed: " + ", ".join(fails))
-    except Exception as e:                            # rollback — leave the live dataset intact
-        os.remove(dest)
-        if backup:
-            os.replace(backup, dest)
+        if intake:                                    # first-run only: require >= 12 months
+            c = sqlite3.connect(tmp)
+            dmin, dmax = c.execute(
+                "SELECT min(date), max(date) FROM daily WHERE is_projected=0").fetchone()
+            c.close()
+            span = (0 if dmin is None
+                    else (datetime.date.fromisoformat(dmax) - datetime.date.fromisoformat(dmin)).days)
+            if span < 365:
+                raise RuntimeError(f"intake needs at least 12 months of history; these files span "
+                                   f"{span} days ({dmin} to {dmax}).")
+    except Exception as e:                            # rollback the WHOLE batch — live dataset intact
+        _rollback_uploads(written)
         if os.path.exists(tmp):
             os.remove(tmp)
         raise HTTPException(422, f"Upload rejected — dataset wouldn't rebuild cleanly: {e}")
 
     os.replace(tmp, WKO_DB)
-    if backup and os.path.exists(backup):
-        os.remove(backup)
+    for dest, backup, _ in written:
+        if backup and os.path.exists(backup):
+            os.remove(backup)
     _load_training_data()
-    return {"ok": True, "filename": name, "sheets": sheets,
+    return {"ok": True, "files": [n for _, _, n in written], "sheets": sorted(all_sheets),
             "data_through": _S["as_of"], "board_status": _S["status"]}
 
 
 # ---------------- athlete profile ----------------
 _INT_FIELDS = {"birth_year", "floor_hold_weeks", "floor_window_months"}
 _STR_FIELDS = {"name", "units", "week_starts_on"}
-_NULLABLE = {"birth_year"}
+_NULLABLE = {"birth_year", "weight_kg"}      # empty weight saves as None (float otherwise)
 
 
 def _coerce(field, value):
@@ -568,12 +724,13 @@ def _coerce(field, value):
 @app.get("/api/profile")
 def get_profile():
     p = _S["profile"]
-    year = int(_S["as_of"][:4])
+    year = int(_S["as_of"][:4]) if _S.get("as_of") else None   # no data yet during cold-start intake
     return {
         "profile": dataclasses.asdict(p),
         "fixed_fact_fields": list(AthleteProfile.FIXED_FACT_FIELDS),
         "tuned_fields": list(AthleteProfile.TUNED_FIELDS),
-        "derived": {"age": p.age(year), "is_masters": p.is_masters(year)},
+        "derived": {"age": p.age(year) if year else None,
+                    "is_masters": p.is_masters(year) if year else False},
     }
 
 

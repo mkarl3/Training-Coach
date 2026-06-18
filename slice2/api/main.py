@@ -18,7 +18,7 @@ for p in (SLICE2, SLICE1):
     sys.path.insert(0, p)
 
 from wko_metrics import metrics, detectors          # noqa: E402
-from watchman import select, DEFAULT_SELECTION       # noqa: E402
+from watchman import select, DEFAULT_SELECTION, apply_life_events, load_life_events  # noqa: E402
 
 DB = os.environ.get("WKO_DB", r"C:\Users\mkarl\OneDrive\Documents\Training Coach\slice0\wko.db")
 
@@ -33,9 +33,13 @@ _STATE = {}
 @app.on_event("startup")
 def _load():
     conn = sqlite3.connect(DB, check_same_thread=False)
-    m = metrics.Metrics(conn)              # loads data into DataFrames; conn unused afterwards
+    m = metrics.Metrics(conn)              # loads data into DataFrames
     _STATE["m"] = m
-    _STATE["findings"] = detectors.run_all(m)
+    # DECISION: keep this same handle for life events. In the standalone watchman the DB is
+    # wko.db, which holds no season-layer tables, so load_life_events() returns [] and the call
+    # is a no-op (byte-identical). Life events take effect in the unified app, whose conn IS the
+    # season-layer DB (coach.db). No second connection is opened here.
+    _STATE["findings"] = apply_life_events(detectors.run_all(m), load_life_events(conn))
     _STATE["date_min"] = m.daily.index.min().strftime("%Y-%m-%d")
     _STATE["date_max"] = m.daily.index.max().strftime("%Y-%m-%d")
 

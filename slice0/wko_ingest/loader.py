@@ -214,6 +214,22 @@ def _classify(basename):
     return "?"
 
 
+def classify_sheet(names):
+    """Family of a worksheet from its COLUMN HEADERS (filename-agnostic) — `names` is the
+    header_map() name->idx dict. The export types have non-overlapping signature columns:
+    TiZ has the time-in-zone columns, PMC the CTL/ATL/TSB metrics, Training History the
+    per-workout fields. Checked most-specific first so a PMC sheet that also carries a TSS
+    column still reads as PMC. Returns 'TH' | 'PMC' | 'TiZ' | None (unrecognized)."""
+    keys = set(names)
+    if any(k in keys for k in TIZ_FIELDS):
+        return "TiZ"
+    if any(k in keys for k in PMC_METRIC_FIELDS):
+        return "PMC"
+    if any(k in keys for k in TH_FIELDS):
+        return "TH"
+    return None
+
+
 def _date_range(dates):
     ds = [d for d in dates if d]
     return (min(ds), max(ds)) if ds else (None, None)
@@ -259,12 +275,18 @@ def build_database(db_path, exports_dir, loaded_at=None):
         wb = openpyxl.load_workbook(f, data_only=True, read_only=False)
         try:
             for ws in wb.worksheets:
-                sheet_fam = fam
-                if fam == "Week":
-                    title = ws.title.lower()
-                    sheet_fam = ("TH" if "training" in title else
-                                 "PMC" if "pmc" in title else
-                                 "TiZ" if "tiz" in title else fam)
+                # Classify by CONTENT (column headers) so any filename works; fall back to the
+                # filename family / weekly sheet-title only when the content is unrecognized.
+                names, _di = header_map(ws)
+                sheet_fam = classify_sheet(names)
+                if sheet_fam is None:
+                    if fam == "Week":
+                        title = ws.title.lower()
+                        sheet_fam = ("TH" if "training" in title else
+                                     "PMC" if "pmc" in title else
+                                     "TiZ" if "tiz" in title else None)
+                    elif fam in ("TH", "PMC", "TiZ"):
+                        sheet_fam = fam
 
                 if sheet_fam == "TH":
                     recs = read_training_history(ws, base)

@@ -47,6 +47,7 @@ function pmcBit(label, p) {
 }
 
 function BriefingCard({ b }) {
+  if (!b || !b.week_reviewed || !b.pmc) return null;   // never crash the chat on a bad payload
   const wr = b.week_reviewed;
   const nw = b.next_week;
   return (
@@ -124,7 +125,9 @@ export default function Coach({ meta, onPlanChanged, onClose }) {
     if (busy) return;
     setBusy(true);
     try {
-      const b = await fetch(`/api/coach/weekly-briefing`).then((r) => r.json());
+      const r = await fetch(`/api/coach/weekly-briefing`);
+      const b = await r.json();
+      if (!r.ok || !b.week_reviewed) throw new Error(b.detail || "briefing unavailable");
       setMsgs((m) => [...m, { role: "briefing", briefing: b }]);
     } catch {
       setMsgs((m) => [...m, { role: "assistant", content: "(couldn't load this week's briefing)" }]);
@@ -183,9 +186,7 @@ export default function Coach({ meta, onPlanChanged, onClose }) {
           <span>weekly check-in · what you report is saved as dated notes</span>
         </div>
         <div className="head-actions">
-          <button className="weekly-btn" onClick={startWeeklyCheckin} disabled={busy}>
-            Weekly Check-In
-          </button>
+          <button className="weekly-btn" onClick={startWeeklyCheckin} disabled={busy}>Weekly Check-In</button>
           {onClose && <button className="chat-close" onClick={onClose} aria-label="Close">▼</button>}
         </div>
       </div>

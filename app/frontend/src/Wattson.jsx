@@ -1,8 +1,9 @@
 import React from "react";
 
-// Coach Wattson — live SVG sprite. Ported verbatim from the Watt Smith brand book's generator
-// (brand/watt-smith-brand-book.html). One base, three moods, recolorable, crisp at any size.
-// He is the ONLY 8-bit thing here that carries meaning; the data stays clean.
+// Coach Wattson — live SVG sprite, ported VERBATIM from the Watt Smith brand book
+// (brand/watt-smith-brand-book.html §02 + its <script>). One base, recolorable, crisp at any
+// size; he always wears the cap. Do not redraw or rasterize — this is the only 8-bit thing that
+// carries meaning; the data stays clean.
 const S = 6;
 const FACE = [[7,6,10],[8,5,12],[9,5,12],[10,5,12],[11,5,12],[12,5,12],[13,5,12],[14,6,10],[15,6,10],[16,7,8],[17,8,6],[18,9,4]];
 const CAP = [[2,8,6],[3,6,10],[4,5,12],[5,5,12],[6,5,12]];
@@ -44,18 +45,18 @@ function rects(expr) {
   return r;
 }
 
-const VB = { full: "0 0 132 174", head: "0 0 132 132" };
+export const VB_FULL = "0 0 132 174";
+export const VB_HEAD = "0 0 132 132";
 
-// mood from board status + fitness trend: alert/watch -> alarmed; green & rising -> approving; else calm.
-export function moodFor(status, ctlRising) {
-  if (status && status !== "green") return "alarmed";
-  return ctlRising ? "approving" : "calm";
+// mood from board status: alert/watch -> alarmed; green -> approving (a clean board is earned).
+export function moodFromStatus(status) {
+  return status === "green" ? "approving" : status === "awaiting" ? "calm" : "alarmed";
 }
 
-export default function CoachWattson({ mood = "calm", variant = "head", className }) {
+export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, style }) {
   return (
-    <svg className={className} viewBox={VB[variant]} shapeRendering="crispEdges"
-      style={{ width: "100%", height: "auto", imageRendering: "pixelated", display: "block" }}
+    <svg className={className} viewBox={viewBox} shapeRendering="crispEdges"
+      style={{ width: "100%", height: "auto", imageRendering: "pixelated", display: "block", ...style }}
       dangerouslySetInnerHTML={{ __html: rects(mood) }} />
   );
 }

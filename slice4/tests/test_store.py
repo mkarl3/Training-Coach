@@ -9,6 +9,34 @@ def _conn():
     return c, ps.active_season(c)["id"]
 
 
+def test_general_goal_persists_and_validates():
+    c = ps.connect(":memory:")
+    sid = ps.create_season(c, "S", "2026-06-01", 7.0, "t", general_goal="durability")
+    assert ps.active_season(c)["general_goal"] == "durability"
+    ps.update_season(c, sid, general_goal="balanced")
+    assert ps.active_season(c)["general_goal"] == "balanced"
+    # the four allowed strings + None are accepted; anything else is rejected (validated in app)
+    for g in ("durability", "sustained_threshold", "anaerobic", "balanced", None):
+        ps.update_season(c, sid, general_goal=g)
+    for bad in ("threshold", "endurance", "sprint", ""):
+        try:
+            ps.update_season(c, sid, general_goal=bad)
+            assert False, f"expected ValueError for {bad!r}"
+        except ValueError:
+            pass
+    try:
+        ps.create_season(c, "S2", "2026-06-01", 7.0, "t", general_goal="bogus")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_season_without_general_goal_defaults_null():
+    c = ps.connect(":memory:")
+    ps.create_season(c, "S", "2026-06-01", 7.0, "t")
+    assert ps.active_season(c)["general_goal"] is None
+
+
 def test_active_modifiers_shape_for_generator():
     c, sid = _conn()
     ps.add_modifier(c, sid, "availability", "2026-06-08", "2026-06-14", "t", hours=12.0, reason="free")
