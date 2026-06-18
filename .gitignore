@@ -17,6 +17,10 @@ dist/
 *.db
 *.sqlite
 *.sqlite3
+*.db.tmp
+*.userbak
+*.obtest
+*.bak
 
 # --- PERSONAL TRAINING DATA — never committed (privacy) ---
 WKO5 Exports/
