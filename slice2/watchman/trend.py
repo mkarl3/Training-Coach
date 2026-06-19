@@ -88,64 +88,77 @@ def _pct(ratio):
     return int(round((ratio - 1.0) * 100))
 
 
-def _template(mode, ev):
-    """Plain-language (title, read, plan-hint) for a mode from its evidence. No jargon. Numbers
-    are woven in only when the evidence actually carries them — never a bare '~0'."""
+_RULE_LABEL = "COACH WATTSON'S TAKE"       # historical/strength: his voice on what the trend taught
+_PLAN_LABEL = "WHAT YOUR PLAN IS DOING"    # the now-insight: the live prescription
+
+
+def _template(mode, ev, meta):
+    """For a mode + its evidence: (title, observation, lesson, rule-it-created). Plain language,
+    no jargon. The 'rule' connects the diagnosis to the actual guardrail it informs (THE ONE
+    RULE: the trend shapes deterministic plan constants — Wattson just names which one)."""
     g = ev.get
+    ratio = (meta or {}).get("safe_acute_ratio")
+    jump_pct = f"about {_pct(ratio)}%" if ratio else "too far"
     if mode == "gap_unravel":
         drop = round(float(g("ctl_decline_over_window", 0) or 0))
         peak = round(float(g("ctl_peak_before", 0) or 0))
-        detail = (f"You'd built to a fitness peak (~{peak}), then the thread broke — usually a gap "
-                  f"off the bike — and ~{drop} points of that fitness drained away. "
-                  if peak > 0 and drop > 0 else
-                  "You'd been building, then the thread broke — usually a gap off the bike — and "
-                  "fitness started draining away. ")
-        return ("Fitness leak after a peak",
-                detail + "Fitness lost this way takes roughly twice as long to win back as it "
-                "did to lose.",
-                "Why the plan rebuilds gradually instead of chasing the old peak.")
+        obs = (f"You'd built to a fitness peak (~{peak}), then the thread broke — usually a gap "
+               f"off the bike — and ~{drop} points of that fitness drained away."
+               if peak > 0 and drop > 0 else
+               "You'd been building, then the thread broke — usually a gap off the bike — and "
+               "fitness started draining away.")
+        return ("Fitness leak after a peak", obs,
+                "Fitness lost this way takes roughly twice as long to win back as it took to "
+                "lose, so the goal is to rebuild steadily, not chase the old peak.",
+                f"Here's my read: you grabbed fitness in a leap, then lost the thread and watched "
+                f"it drain right back out. I'm not letting that happen to you twice — it's exactly "
+                f"why I keep a lid on your weekly jumps at {jump_pct} over your recent normal.")
     if mode == "under_load":
         floor = round(float(g("floor", 0) or 0))
         recent = round(float(g("recent_peak_ctl", 0) or 0))
-        detail = (f"Your weekly load sat under the base you've shown you can hold (~{floor}), and "
-                  f"fitness drifted to ~{recent}. " if floor > 0 else
-                  "Your weekly load sat under the base you've shown you can hold. ")
-        return ("Training below your sustainable base",
-                detail + "That's under-stimulating — consistency, not big days, is what rebuilds "
-                "it.",
-                "The plan steps load up toward your floor, week by week.")
+        obs = (f"Your weekly load sat under the base you've shown you can hold (~{floor}), and "
+               f"fitness drifted to ~{recent}." if floor > 0 else
+               "Your weekly load sat under the base you've shown you can hold.")
+        return ("Training below your sustainable base", obs,
+                "Under-stimulating — steady consistency rebuilds this, not the occasional big day.",
+                "My take: you've been training under what you can handle, and the fitness quietly "
+                "slipped away. So I'm walking your weekly load back up toward your base — steady, "
+                "a step at a time, no rush.")
     if mode == "overtraining":
         return ("Dug into a fatigue hole",
-                "Your form sat deep in the red for a stretch — fatigue was outrunning recovery. "
-                "More load isn't the answer here; genuine easy days are.",
-                "The plan protects recovery before adding stress.")
+                "Your form sat deep in the red for a stretch — fatigue was outrunning recovery.",
+                "More load is the wrong lever here; genuine easy days are what dig you out.",
+                "Straight talk: you were burying yourself and recovery couldn't keep up. I guard "
+                "your easy days before I ever pile on more stress — that's how we climb out.")
     if mode == "monotony":
         mono = round(float(g("monotony", 0) or 0), 1)
-        detail = (f"Your training got monotonous (monotony ~{mono}) — " if mono > 0 else
-                  "Your training got monotonous — ")
-        return ("Too much of the same",
-                detail + "most days landing in the same middle zone. Making hard days truly hard "
-                "and easy days truly easy lowers the strain for the same total work.",
-                "The plan spreads intensity instead of greying it together.")
+        obs = (f"Your training got monotonous (monotony ~{mono}) — most days landing in the same "
+               "middle zone." if mono > 0 else
+               "Your training got monotonous — most days landing in the same middle zone.")
+        return ("Too much of the same", obs,
+                "One-flavour training raises the strain for the same total work.",
+                "Here's the thing — it all looked the same, and that grinds you down for no extra "
+                "payoff. I'll keep your hard days truly hard and your easy days truly easy, so "
+                "every session earns its place.")
     if mode == "fragile_ftp":
         dec = round(float(g("decoupling_pct", 0) or 0), 1)
-        detail = (f"On your longer rides your heart rate drifted ~{dec}% above what your power "
-                  "alone would predict — " if dec > 0 else
-                  "On your longer rides your heart rate drifted up off your power — ")
-        return ("Endurance fraying on long rides",
-                detail + "a sign the aerobic engine fatigues late. More steady endurance time "
-                "firms this up.",
-                "The plan keeps long aerobic rides in the mix.")
+        obs = (f"On your longer rides your heart rate drifted ~{dec}% above what your power alone "
+               "would predict." if dec > 0 else
+               "On your longer rides your heart rate drifted up off your power.")
+        return ("Endurance fraying on long rides", obs,
+                "A durability signal — the aerobic engine fatiguing late, not a fitness problem.",
+                "What I see: your engine frays a little late on the long ones. Nothing's broken — "
+                "we just bank more steady aerobic time and firm it right up.")
     if mode == "injury_spike":
         acwr = float(g("acwr", 1.0) or 1.0)
-        detail = (f"In one week you piled on about {_pct(acwr)}% more than your recent normal — "
-                  if acwr > 1.0 else "In one week you piled on far more load than your recent "
-                  "normal — ")
-        return ("A sharp load spike",
-                detail + "the kind of jump that tends to precede setbacks. Ramping in beats "
-                "leaping.",
-                "Why the plan caps how fast you add load.")
-    return (mode.replace("_", " "), "A flagged training pattern.", None)
+        obs = (f"In one week you piled on about {_pct(acwr)}% more than your recent normal."
+               if acwr > 1.0 else "In one week you piled on far more load than your recent normal.")
+        return ("A sharp load spike", obs,
+                "Big single-week jumps are the kind of thing that tends to precede setbacks.",
+                f"My take: too much, too fast — the kind of jump that gets people hurt. I keep a "
+                f"firm lid on it for you, no more than {jump_pct} over your recent normal in a "
+                "week.")
+    return (mode.replace("_", " "), "A flagged training pattern.", "", "")
 
 
 def _direction(end, as_of):
@@ -157,9 +170,9 @@ def _direction(end, as_of):
     return "earlier this year"
 
 
-def _failure_insights(findings, m, as_of, top_n):
+def _failure_insights(findings, m, as_of, top_n, meta):
     """One representative (most-recent) episode per active mode, ranked by action priority then
-    recency, capped to top_n."""
+    recency, capped to top_n. Each carries observation -> lesson -> the rule it created."""
     by_mode = {}
     for f in findings:
         if f["severity"] != "confirmed":
@@ -175,26 +188,26 @@ def _failure_insights(findings, m, as_of, top_n):
             continue
         ep = max(eps, key=lambda e: e["end"])          # most recent episode of this mode
         cands.append((mode, ep))
-    # rank: highest action priority first, then most recent
     cands.sort(key=lambda me: (DETECTORS.priority.get(me[0], 99), -me[1]["end"].toordinal()))
 
     out = []
     for mode, ep in cands[:top_n]:
         tone, mood = _TONE.get(mode, ("hold", "calm"))
-        title, read, plan = _template(mode, ep["ev"])
+        title, obs, mean, act = _template(mode, ep["ev"], meta)
         out.append({
             "id": mode, "mode_id": mode,
             "zone_start": ep["start"].isoformat(), "zone_end": ep["end"].isoformat(),
             "anchor_date": ep["end"].isoformat(),
             "color": tone, "mood": mood, "strength": False,
-            "title": title, "read": read,
-            "direction": _direction(ep["end"], as_of), "plan": plan,
+            "title": title, "obs": obs, "mean": mean, "act": act, "act_label": _RULE_LABEL,
+            "direction": _direction(ep["end"], as_of), "proj": None, "cta": False,
         })
     return out
 
 
-def _now_insight(m, as_of):
-    """Always-present read of the current state — Wattson tells you what 'now' means."""
+def _now_insight(m, as_of, plan, proj_text):
+    """Always-present read of the current state, ending in the LIVE prescription pulled from the
+    plan (real week-1 numbers) plus the forward projection and a 'see this week' CTA."""
     ao = pd.Timestamp(as_of)
     ctl = m.daily.loc[m.daily.index <= ao, "ctl"].dropna()
     if ctl.empty:
@@ -203,54 +216,74 @@ def _now_insight(m, as_of):
     tsb_now = float(m.tsb.asof(ao)) if not m.tsb.dropna().empty else 0.0
     recent = ctl[ctl.index > ao - pd.Timedelta(days=28)]
     chg = float(recent.iloc[-1] - recent.iloc[0]) if len(recent) >= 2 else 0.0
-
     thr = m.ctl_percentile_threshold(m.profile.detraining_pctile, as_of=True).asof(ao)
     below = (thr is not None) and (not pd.isna(thr)) and (ctl_now < float(thr))
 
     if below and tsb_now > 0:
-        title = "Fresh on paper, light on fitness"
-        read = ("Your form reads fresh only because there's so little fatigue — not because "
-                "you're race-ready. The ceiling right now is your low fitness, not your "
-                "freshness, so don't let feeling good tempt a big week.")
-        mood = "calm"
+        title, mood = "Fresh on paper, light on fitness", "calm"
+        obs = ("Your fitness is below your normal range, and your form only reads fresh because "
+               "there's so little fatigue.")
+        mean = ("The ceiling right now is your low fitness, not your freshness — chasing that "
+                "green form with a big week is exactly how a crash starts.")
     elif below:
-        title = "Fitness is below your normal range"
-        read = ("Your fitness is sitting under where it usually lives for you. Nothing's wrong — "
-                "but it's a rebuild, and rebuilds reward steady consistency over hero weeks.")
-        mood = "calm"
+        title, mood = "Fitness is below your normal range", "calm"
+        obs = "Your fitness is sitting under where it usually lives for you."
+        mean = "It's a rebuild — and rebuilds reward steady consistency over hero weeks."
     elif chg > 1:
-        title = "Building, and holding it"
-        read = ("Fitness is trending up and you're absorbing the load. This is the good kind of "
-                "stress — keep the ramp honest and it'll keep paying off.")
-        mood = "approving"
+        title, mood = "Building, and holding it", "approving"
+        obs = "Fitness is trending up and you're absorbing the load."
+        mean = "This is the good kind of stress — keep the ramp honest and it keeps paying off."
     else:
-        title = "Holding steady"
-        read = ("Fitness is roughly flat — you're maintaining. Fine for now; when you want to "
-                "build again, a gentle, consistent ramp is the lever.")
-        mood = "calm"
+        title, mood = "Holding steady", "calm"
+        obs = "Fitness is roughly flat — you're maintaining."
+        mean = "Fine for now; when you want to build, a gentle, consistent ramp is the lever."
 
+    act = _prescription(plan)
     dirn = "trending up" if chg > 1 else "sliding" if chg < -1 else "holding"
     return {"id": "now", "mode_id": "now", "zone_start": None, "zone_end": None,
             "anchor_date": ctl.index[-1].strftime("%Y-%m-%d"), "color": "gold", "mood": mood,
-            "strength": False, "title": title, "read": read, "direction": dirn, "plan": None}
+            "strength": False, "title": title, "obs": obs, "mean": mean, "act": act,
+            "act_label": _PLAN_LABEL, "direction": dirn, "proj": proj_text, "cta": bool(plan)}
+
+
+def _prescription(plan):
+    """The live week-1 prescription, in plain words, from the generator's own numbers."""
+    if not plan or not plan.get("weeks"):
+        return ("Your rebuild is a steady, consistent ramp — no hero weeks. Open the plan to see "
+                "this week's target.")
+    w0, meta = plan["weeks"][0], plan.get("meta", {})
+    tss = w0.get("weekly_tss_target")
+    cap = w0.get("single_ride_tss_cap")
+    ramp = meta.get("sustainable_ramp") or meta.get("ramp_cap")
+    recent = meta.get("recent_weekly_tss")
+    bits = []
+    if tss:
+        bits.append(f"opens at {tss} TSS"
+                    + (f" — a safe step from your recent ~{recent}" if recent else ""))
+    if cap:
+        bits.append(f"caps single rides at {cap}")
+    if ramp:
+        bits.append(f"won't ramp faster than {round(float(ramp), 1)} fitness/week")
+    if not bits:
+        return "Open the plan to see this week's target."
+    return "Next week " + ", ".join(bits) + ". Your job is consistency, not hero days."
 
 
 def _strength_insight(m, as_of, safe_ramp):
-    """The athlete's cleanest sustained build — surface what WORKS, not only what's wrong.
-    A window whose CTL gain was largely held (not given straight back). None if history is thin."""
+    """The athlete's cleanest sustained build — what WORKS, and the ramp it anchors."""
     wk = m.weekly_ctl().dropna()
     wk = wk[wk.index <= pd.Timestamp(as_of)]
     if len(wk) < 16:
         return None
     vals, idx = wk.values, wk.index
     best = None
-    span = 10                                          # ~10-week build window
+    span = 10
     for i in range(len(vals) - span):
         j = i + span
         gain = vals[j] - vals[i]
         if gain < 5:
             continue
-        future = vals[j:min(len(vals), j + 4)]         # held over the next ~month?
+        future = vals[j:min(len(vals), j + 4)]
         if future.min() < vals[i] + 0.6 * gain:
             continue
         if best is None or gain > best["gain"]:
@@ -264,23 +297,53 @@ def _strength_insight(m, as_of, safe_ramp):
             "anchor_date": idx[best["j"]].strftime("%Y-%m-%d"),
             "color": "green", "mood": "approving", "strength": True,
             "title": "Your proven safe build",
-            "read": (f"Your cleanest stretch — about +{g} fitness over {span} weeks that you "
-                     "actually held onto, no crash after. This is the build your body has shown "
-                     "it can absorb, and it's the ramp the plan trusts."),
-            "direction": "reference",
-            "plan": f"Anchors your safe ramp of ~{round(safe_ramp, 1)} fitness/week."}
+            "obs": f"Your cleanest stretch — about +{g} fitness over {span} weeks that you "
+                   "actually held onto, with no crash afterward.",
+            "mean": "This is the ramp your body has shown it can absorb and keep.",
+            "act": f"This one I like: you built clean and made it stick. That's the ramp I trust "
+                   f"for you — about {round(safe_ramp, 1)} fitness a week — and I won't push you "
+                   "past what you've already proven you can hold.",
+            "act_label": _RULE_LABEL, "direction": "reference", "proj": None, "cta": False}
 
 
-def build_trend(m, findings, as_of, top_failures=3, plan_weeks=None):
-    """Assemble the full trend-view payload for `as_of`. `plan_weeks` (optional) lets the hover
-    scrubber show the training block a week belongs to, where the plan covers it."""
+def _projection(plan):
+    """Deterministic forward fitness line = the plan's own per-week CTL targets (THE ONE RULE:
+    the generator computes these; we just plot them). Returns points + the peak it reaches."""
+    if not plan or not plan.get("weeks"):
+        return None
+    pts = [{"date": w["week_end"], "ctl": round(float(w["ctl_target"]), 1)}
+           for w in plan["weeks"] if w.get("ctl_target") is not None]
+    if not pts:
+        return None
+    peak = max(pts, key=lambda p: p["ctl"])
+    return {"points": pts, "target_ctl": peak["ctl"], "target_date": peak["date"]}
+
+
+def _proj_text(projection):
+    if not projection:
+        return None
+    d = dt.date.fromisoformat(projection["target_date"])
+    return (f"Hold this plan and your fitness climbs back to about {round(projection['target_ctl'])} "
+            f"by {_MONTHS[d.month - 1]} {d.year}.")
+
+
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August",
+           "September", "October", "November", "December"]
+
+
+def build_trend(m, findings, as_of, top_failures=3, plan=None):
+    """Assemble the full trend-view payload for `as_of`. `plan` (optional) supplies the training
+    blocks (hover scrubber), the live prescription (now-insight), and the forward projection."""
     as_of = pd.Timestamp(as_of).strftime("%Y-%m-%d")
+    meta = (plan or {}).get("meta", {})
+    plan_weeks = (plan or {}).get("weeks")
     safe_ramp = m.personal_sustainable_ramp()
     if safe_ramp is None:
         safe_ramp = float(m.profile.ramp_rate_cap)
 
-    insights = _failure_insights(findings, m, as_of, top_failures)
-    now = _now_insight(m, as_of)
+    projection = _projection(plan)
+    insights = _failure_insights(findings, m, as_of, top_failures, meta)
+    now = _now_insight(m, as_of, plan, _proj_text(projection))
     if now:
         insights.append(now)
     strength = _strength_insight(m, as_of, safe_ramp)
@@ -294,5 +357,6 @@ def build_trend(m, findings, as_of, top_failures=3, plan_weeks=None):
         "date_min": series[0]["date"] if series else as_of,
         "safe_ramp": round(float(safe_ramp), 1),
         "series": series,
+        "projection": projection,
         "insights": insights,
     }

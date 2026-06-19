@@ -135,7 +135,7 @@ export default function App() {
 
       <div className="main">
         {view === "dashboard"
-          ? <Watchman key={"w" + dataKey} meta={meta} />
+          ? <Watchman key={"w" + dataKey} meta={meta} onSeeWeek={() => setView("calendar")} />
           : <Calendar key={"cal" + dataKey + "-" + planKey} />}
       </div>
 

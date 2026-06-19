@@ -15,9 +15,10 @@ def _as_of(m):
 
 def test_payload_shape(m, findings):
     t = build_trend(m, findings, _as_of(m))
-    assert set(t) == {"as_of", "date_min", "safe_ramp", "series", "insights"}
+    assert set(t) == {"as_of", "date_min", "safe_ramp", "series", "projection", "insights"}
     assert isinstance(t["safe_ramp"], float) and t["safe_ramp"] > 0
     assert t["series"] and t["date_min"] == t["series"][0]["date"]
+    assert t["projection"] is None                          # no plan passed -> no projection
 
 
 def test_series_is_weekly_ascending_with_ctl_and_tss(m, findings):
@@ -46,9 +47,23 @@ def test_blocks_attach_when_plan_covers_a_week(m, findings):
                (dt.date.fromisoformat(s0[-2]["date"]) - dt.timedelta(days=6)).isoformat()]
     plan_weeks = [{"week_start": mondays[0], "block": "Build 2"},
                   {"week_start": mondays[1], "block": "Build 2"}]
-    s = build_trend(m, findings, _as_of(m), plan_weeks=plan_weeks)["series"]
+    s = build_trend(m, findings, _as_of(m), plan={"weeks": plan_weeks})["series"]
     assert s[-1]["block"] == "Build 2" and s[-2]["block"] == "Build 2"
     assert s[0]["block"] is None                           # uncovered weeks stay None
+
+
+def test_projection_and_prescription_from_plan(m, findings):
+    plan = {"meta": {"sustainable_ramp": 2.5, "recent_weekly_tss": 108, "safe_acute_ratio": 1.72},
+            "weeks": [{"week_start": "2026-06-22", "week_end": "2026-06-28", "block": "Prep",
+                       "weekly_tss_target": 185, "single_ride_tss_cap": 61, "ctl_target": 20.2},
+                      {"week_start": "2026-06-29", "week_end": "2026-07-05", "block": "Prep",
+                       "weekly_tss_target": 190, "single_ride_tss_cap": 63, "ctl_target": 24.0}]}
+    t = build_trend(m, findings, _as_of(m), plan=plan)
+    proj = t["projection"]
+    assert proj and len(proj["points"]) == 2 and proj["target_ctl"] == 24.0
+    now = next(i for i in t["insights"] if i["id"] == "now")
+    assert "185" in now["act"] and "61" in now["act"]       # real prescription numbers
+    assert now["cta"] is True and now["proj"]               # CTA + projection line present
 
 
 def test_series_does_not_exceed_as_of(m, findings):
@@ -60,7 +75,9 @@ def test_series_does_not_exceed_as_of(m, findings):
 def test_now_insight_always_present(m, findings):
     t = build_trend(m, findings, _as_of(m))
     now = [i for i in t["insights"] if i["id"] == "now"]
-    assert len(now) == 1 and now[0]["zone_start"] is None and now[0]["read"]
+    assert len(now) == 1 and now[0]["zone_start"] is None
+    assert now[0]["obs"] and now[0]["mean"] and now[0]["act"]
+    assert now[0]["act_label"] == "WHAT YOUR PLAN IS DOING"
 
 
 def test_failures_capped_and_ranked(m, findings):
@@ -75,10 +92,11 @@ def test_failures_capped_and_ranked(m, findings):
 
 def test_insights_have_clean_prose_no_jargon_no_bare_zeros(m, findings):
     for i in build_trend(m, findings, _as_of(m))["insights"]:
-        assert i["title"] and len(i["read"]) > 20
-        assert "~0" not in i["read"] and "None" not in i["read"]
+        assert i["title"] and len(i["obs"]) > 15 and i["mean"] and i["act"]
+        prose = " ".join([i["obs"], i["mean"], i["act"]])
+        assert "~0" not in prose and "None" not in prose
         for j in JARGON:
-            assert j not in i["read"], f"{i['id']} leaked jargon {j!r}"
+            assert j not in prose, f"{i['id']} leaked jargon {j!r}"
 
 
 def test_every_insight_has_a_mood_and_known_color(m, findings):

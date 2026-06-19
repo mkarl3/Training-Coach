@@ -28,16 +28,21 @@ function segColor(slope, safe) {
   return STATE.hold;
 }
 
-function Chart({ data, safe, insights, sel, onSel }) {
+function Chart({ data, safe, insights, sel, onSel, projection }) {
   const [hover, setHover] = useState(null);
-  const W = 760, H = 200, pL = 34, pR = 14, pT = 12, pB = 26;
-  const plotW = W - pL - pR, plotH = H - pT - pB;
   if (data.length < 2) return <div className="empty-ok">Not enough history yet — keep logging rides.</div>;
 
-  const ctls = data.map((d) => d.ctl);
+  const lastDate = data[data.length - 1].date;
+  const proj = (projection?.points || []).filter((p) => p.date > lastDate);
+  const projOn = sel === "now";
+  const W = 760, H = 200, pL = 34, pR = proj.length ? 50 : 14, pT = 12, pB = 26;
+  const plotW = W - pL - pR, plotH = H - pT - pB;
+  const tot = data.length + proj.length;
+
+  const ctls = data.map((d) => d.ctl).concat(proj.map((p) => p.ctl));
   const ymin = Math.max(0, Math.floor((Math.min(...ctls) - 8) / 10) * 10);
   const ymax = Math.ceil((Math.max(...ctls) + 6) / 10) * 10;
-  const X = (i) => pL + (data.length < 2 ? 0 : (i * plotW) / (data.length - 1));
+  const X = (i) => pL + (i * plotW) / (tot - 1);
   const Y = (v) => pT + ((ymax - v) * plotH) / (ymax - ymin);
   const idxByDate = Object.fromEntries(data.map((d, i) => [d.date, i]));
   const barMax = Math.max(...data.map((d) => d.tss), 1);
@@ -53,7 +58,7 @@ function Chart({ data, safe, insights, sel, onSel }) {
   const onMove = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     const vbX = ((e.clientX - r.left) / r.width) * W;
-    let i = Math.round(((vbX - pL) / plotW) * (data.length - 1));
+    let i = Math.round(((vbX - pL) / plotW) * (tot - 1));
     setHover(Math.max(0, Math.min(data.length - 1, i)));
   };
   const hd = hover != null ? data[hover] : null;
@@ -89,6 +94,26 @@ function Chart({ data, safe, insights, sel, onSel }) {
             stroke={segColor(d.ctl - data[i - 1].ctl, safe)} strokeWidth="3" strokeLinecap="round" />
         );
       })}
+      {proj.length > 0 && (() => {
+        const tIdx = proj.reduce((bi, p, k, a) => (p.ctl > a[bi].ctl ? k : bi), 0);
+        let pv = { x: X(data.length - 1), y: Y(data[data.length - 1].ctl) };
+        const segs = proj.map((p, k) => {
+          const x = X(data.length + k), y = Y(p.ctl), seg = (
+            <line key={"pj" + k} x1={pv.x} y1={pv.y} x2={x} y2={y} stroke="var(--gold)"
+              strokeWidth="2.5" strokeDasharray="2 4" opacity={projOn ? 0.95 : 0.4} strokeLinecap="round" />
+          );
+          pv = { x, y };
+          return seg;
+        });
+        const tx = X(data.length + tIdx), ty = Y(proj[tIdx].ctl);
+        return (
+          <g pointerEvents="none">{segs}
+            <circle cx={tx} cy={ty} r="4" fill="none" stroke="var(--gold)" strokeWidth="2" opacity={projOn ? 1 : 0.5} />
+            <text x={tx + 5} y={ty - 4} fontSize="9.5" fill="var(--gold)" opacity={projOn ? 1 : 0.5}>~{Math.round(proj[tIdx].ctl)}</text>
+            <text x={tx + 5} y={ty + 7} fontSize="8.5" fill="var(--ink-3)" opacity={projOn ? 1 : 0.5}>if you hold</text>
+          </g>
+        );
+      })()}
       {[ymin, Math.round((ymin + ymax) / 2), ymax].map((v, n) => (
         <text key={"y" + n} x="4" y={Y(v) + 3} fontSize="10" fill="var(--ink-3)">{v}</text>
       ))}
@@ -162,7 +187,7 @@ function nearestWeek(date, data) {
 }
 let idxCache = null, idxCacheKey = null;
 
-function ReadStrip({ m }) {
+function ReadStrip({ m, onSeeWeek }) {
   if (!m) return null;
   const col = TONE[m.color];
   return (
@@ -174,17 +199,22 @@ function ReadStrip({ m }) {
           <span className="read-title">{m.title}</span>
           {m.strength && <span className="read-strength">strength</span>}
         </div>
-        <div className="read-text">{m.read}</div>
+        {m.obs && <div className="read-sec"><div className="read-lab">what happened</div><div className="read-text">{m.obs}</div></div>}
+        {m.mean && <div className="read-sec"><div className="read-lab">what it means</div><div className="read-text">{m.mean}</div></div>}
+        {m.act && <div className="read-sec"><div className="read-lab" style={{ color: col }}>{m.act_label || "what your plan is doing"}</div><div className="read-text">{m.act}</div></div>}
+        {m.proj && (
+          <div className="read-proj"><i className="ti ti-target-arrow" aria-hidden="true" /><span>{m.proj}</span></div>
+        )}
         <div className="read-pills">
           <span className="pill-chip" style={{ color: col, borderColor: col }}>{m.direction}</span>
-          {m.plan && <span className="pill-chip">→ {m.plan}</span>}
+          {m.cta && <button className="read-cta" onClick={onSeeWeek}><i className="ti ti-calendar" aria-hidden="true" /> See this week →</button>}
         </div>
       </div>
     </div>
   );
 }
 
-export default function Watchman({ meta }) {
+export default function Watchman({ meta, onSeeWeek }) {
   const [data, setData] = useState(null);
   const [win, setWin] = useState(52);          // default 1yr
   const [sel, setSel] = useState("now");
@@ -210,6 +240,7 @@ export default function Watchman({ meta }) {
   const legend = [
     ["build", "building"], ["hot", "ramping hot"], ["hold", "holding"], ["lose", "losing fitness"],
   ];
+  const hasProj = data.projection && data.projection.points && data.projection.points.length > 0;
 
   return (
     <div className="panel trend-panel">
@@ -225,11 +256,12 @@ export default function Watchman({ meta }) {
       <div className="trend-hint">tap a marker on the line</div>
       <div className="trend-grid">
         <div className="trend-left">
-          <Chart data={view.series} safe={data.safe_ramp} insights={view.insights} sel={effSel} onSel={setSel} />
+          <Chart data={view.series} safe={data.safe_ramp} insights={view.insights} sel={effSel} onSel={setSel} projection={data.projection} />
           <div className="trend-legend">
             {legend.map(([k, t]) => (
               <span key={k}><i style={{ background: STATE[k] }} />{t}</span>
             ))}
+            {hasProj && <span><i style={{ background: "var(--gold)" }} />projected (if you hold)</span>}
             <span className="muted">▏bars = weekly TSS</span>
           </div>
           <div className="trend-chips">
@@ -243,7 +275,7 @@ export default function Watchman({ meta }) {
           </div>
         </div>
         <div className="trend-right">
-          <ReadStrip m={selM} />
+          <ReadStrip m={selM} onSeeWeek={onSeeWeek} />
         </div>
       </div>
     </div>
