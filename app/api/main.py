@@ -22,7 +22,7 @@ for p in ("slice4", "slice3", "slice2", "slice1", "slice0"):
     sys.path.insert(0, os.path.join(ROOT, p))
 
 from wko_metrics import metrics, detectors, profile, AthleteProfile, DEFAULT_PROFILE  # noqa: E402
-from watchman import (select, DEFAULT_SELECTION, apply_life_events, load_life_events,  # noqa: E402
+from watchman import (select, build_trend, DEFAULT_SELECTION, apply_life_events, load_life_events,  # noqa: E402
                       add_life_event, list_life_events, delete_life_event,
                       LIFE_EVENT_CATEGORIES, LIFE_EVENT_EFFECTS)
 from wko_ingest import loader, validator               # noqa: E402
@@ -229,6 +229,18 @@ def watchman(as_of: str = Query(...), window: int = Query(120, ge=14, le=400)):
         raise HTTPException(400, f"as_of must be in [{_S['date_min']}, {_S['as_of']}]")
     scfg = dataclasses.replace(DEFAULT_SELECTION, trajectory_window_days=window)
     return select(_S["findings"], as_of, _S["m"], scfg)
+
+
+@app.get("/api/trend")
+def trend(as_of: str = Query(None)):
+    """Long-range fitness-trend payload for the integrated dashboard: weekly CTL+TSS series, the
+    demonstrated-safe ramp (for line colouring), and the capped, ranked, plain-language insights
+    pinned to the timeline. Defaults to the latest data date."""
+    _require_loaded()
+    ao = as_of or _S["as_of"]
+    if not (_S["date_min"] <= ao <= _S["as_of"]):
+        raise HTTPException(400, f"as_of must be in [{_S['date_min']}, {_S['as_of']}]")
+    return build_trend(_S["m"], _S["findings"], ao)
 
 
 # ---------------- coach ----------------

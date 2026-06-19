@@ -18,6 +18,8 @@
   /* app semantic aliases (existing component classes map onto the brand) */
   --ink: var(--cream); --muted: var(--ink-2); --line: #2b3a63; --accent: var(--jacket); --amber: var(--gold);
   --ctl: var(--green); --atl: var(--gold); --tsb: var(--blue); --prov: rgba(120,140,200,0.12);
+  /* fitness-trend ramp states + volume bars */
+  --ramp-hot: #ff7a45; --ramp-hold: #9fb0d8; --ramp-lose: #e06b6b; --bar: rgba(120,140,200,0.18);
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -280,4 +282,39 @@ textarea:focus { outline: 2px solid var(--jacket); }
   padding: 26px 18px; text-align: center; font-size: 13px; cursor: pointer; user-select: none; }
 .ob-drop.over { border-color: var(--gold); color: var(--cream); background: rgba(247,213,29,0.06); }
 
+/* ---- fitness-trend dashboard (integrated PMC + Wattson read) ---- */
+.trend-grid { display: grid; grid-template-columns: minmax(0, 760px) minmax(300px, 440px);
+  gap: 20px; align-items: stretch; justify-content: start; }
+.trend-left { min-width: 0; }
+.trend-right { display: flex; min-width: 0; }
+.trend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.range-bar { display: flex; gap: 6px; }
+.range-btn { font-family: var(--ui); font-weight: 700; font-size: 12px; padding: 5px 11px; border-radius: 7px;
+  cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--ink-2); }
+.range-btn.on { background: var(--gold); color: var(--bg); border-color: var(--gold); }
+.trend-hint { font-family: var(--data); font-size: 10.5px; color: var(--ink-3); margin: 2px 0 6px; }
+.trend-legend { display: flex; gap: 13px; flex-wrap: wrap; font-family: var(--data); font-size: 11px;
+  color: var(--ink-2); margin: 5px 2px 0; }
+.trend-legend i { display: inline-block; width: 11px; height: 3px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.trend-legend .muted { color: var(--ink-3); }
+.trend-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.chip { display: flex; align-items: center; gap: 6px; font-family: var(--ui); font-size: 11.5px; padding: 5px 10px;
+  border-radius: 20px; cursor: pointer; border: 1px solid var(--line); background: transparent; color: var(--ink-2); }
+.chip.on { color: var(--cream); }
+.chip i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.read-strip { display: flex; gap: 12px; background: var(--panel-3); border: 1px solid var(--line);
+  border-radius: 10px; padding: 13px 15px; flex: 1; align-items: flex-start; }
+.read-avatar { flex: 0 0 auto; width: 58px; height: 58px; border-radius: 10px; background: var(--bg);
+  border: 1px solid var(--line); overflow: hidden; display: flex; align-items: flex-start; justify-content: center; }
+.read-body { flex: 1; min-width: 0; }
+.read-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+.read-coach { font-family: var(--data); font-size: 11px; letter-spacing: 0.04em; color: var(--gold); }
+.read-title { font-size: 13.5px; color: var(--cream); }
+.read-strength { margin-left: auto; font-size: 10px; color: var(--bg); background: var(--green); padding: 2px 7px; border-radius: 6px; }
+.read-text { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
+.read-pills { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.pill-chip { font-family: var(--data); font-size: 11px; color: var(--ink-2); border: 1px solid var(--line);
+  border-radius: 20px; padding: 2px 9px; }
+
+@media (max-width: 1024px) { .trend-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .appbar { flex-wrap: wrap; } .coach-drawer { height: 86vh; } .coachbar-txt p { white-space: normal; } }
