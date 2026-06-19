@@ -203,6 +203,22 @@ def test_single_ride_cap_is_half_the_6wk_rolling_avg(m, as_of):
     assert weeks[i]["single_ride_tss_cap"] == round(0.5 * (sum(trailing6) / len(trailing6)))
 
 
+def test_readiness_eases_the_week_tighten_only(m, as_of):
+    # a reported "fried" check-in eases the coming days BELOW the acute cap — but can only tighten.
+    season, events = season_at(as_of, weeks_out=20, hours=20.0)   # loose hours so the acute cap binds
+    base = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    w0 = base["weeks"][0]
+    rd = [{"start_date": w0["week_start"],
+           "end_date": (dt.date.fromisoformat(w0["week_start"]) + dt.timedelta(days=10)).isoformat(),
+           "factor": 0.3, "reason": "felt fried"}]
+    eased = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of, readiness=rd)
+    assert eased["weeks"][0]["weekly_tss_target"] < w0["weekly_tss_target"]      # eased
+    assert any("eased" in c for c in eased["weeks"][0]["constraints_fired"])
+    # tighten-only: it never raises load above the un-readiness plan
+    assert all(e["weekly_tss_target"] <= b["weekly_tss_target"] + 1
+               for e, b in zip(eased["weeks"], base["weeks"]))
+
+
 def test_acute_load_cap_ramps_in_from_recent_baseline(m, as_of):
     # Week 1 must not jump to the full CTL-maintenance+ramp target; it's capped to a demonstrated-
     # safe step over recent actual load. (Loose hours so the ACUTE cap, not the budget, binds.)

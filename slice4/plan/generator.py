@@ -109,7 +109,7 @@ def diff_plans(old, new):
 
 
 def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CALENDAR,
-                  availability=None, intensity_caps=None):
+                  availability=None, intensity_caps=None, readiness=None):
     """Return {"meta": {...}, "weeks": [...]} or {"error": ...}. The plan spans the whole
     season (start -> A-race); weeks already elapsed carry ACTUAL TSS/CTL for planned-vs-actual.
 
@@ -122,6 +122,7 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
     """
     availability = availability or []
     intensity_caps = intensity_caps or []
+    readiness = readiness or []                       # subjective (check-in) readiness ease windows
     today = dt.date.fromisoformat(as_of)
     wstart = profile.week_starts_on
     a_race = pick_a_race(events, today)
@@ -199,6 +200,14 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
     # cap can't see the spike. Derived from summed actual TSS; conservative default if history thin.
     safe_ratio = m.personal_safe_acute_ratio() or 1.3
 
+    # READINESS (tighten-only): how much of that safe jump to actually allow right now. Two inputs,
+    # take the more conservative — neither can raise the demonstrated ceiling, only ease below it:
+    #   subjective — what the athlete reported at check-in ("feeling fried"), a windowed ease that
+    #                decays (read per-week from `readiness`);
+    #   objective  — a form (TSB) backstop that catches fatigue they didn't mention. Applies to the
+    #                near-term weeks only (current fatigue is a now-thing).
+    obj_readiness = m.readiness_from_form(as_of)
+
     # recent-load baselines from SUMMED ACTUAL weekly TSS before plan start (drop empty weeks).
     # load_hist drives the acute cap (recent ~4-wk avg) AND the 50% single-ride rule (rolling
     # ~6-wk avg). Prescribed weeks append as the plan builds, so both caps roll forward.
@@ -268,13 +277,25 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
         week_hours = av["hours"] if av else budget_h
         budget_cap = week_hours * if2 * 100.0
         chronic = (sum(load_hist[-4:]) / len(load_hist[-4:])) if load_hist else 0.0
-        acute_cap = (safe_ratio * chronic) if chronic >= profile.acwr_min_chronic_load else float("inf")
+        # how much of the demonstrated-safe jump to allow this week — the more conservative of the
+        # athlete's report and their form, both <= 1 (ease only). Objective backstop only near-term.
+        rd = _overlaps(mon, we, readiness)
+        subj_rd = rd["factor"] if rd else 1.0
+        obj_rd = obj_readiness if 0 <= (mon - today).days < 21 else 1.0
+        eff_rd = min(subj_rd, obj_rd)
+        eff_ratio = 1.0 + (safe_ratio - 1.0) * eff_rd     # eff_rd<1 pulls the allowed jump toward 1.0 (hold)
+        acute_cap = (eff_ratio * chronic) if chronic >= profile.acwr_min_chronic_load else float("inf")
         eff_cap = min(budget_cap, acute_cap)
         if weekly_tss > eff_cap and not ua:
             new_ramp = (eff_cap - 7 * ctl) / ramp_coef
             if acute_cap <= budget_cap:
+                ease = ""
+                if eff_rd < 1.0:
+                    why = (rd.get("reason") or "you're feeling run-down") if subj_rd <= obj_rd else \
+                          "your form is run-down right now"
+                    ease = f" — eased ({why})"
                 fired.append(f"acute-load cap -> {eff_cap:.0f} TSS: a safe step up from your recent "
-                             f"~{chronic:.0f}/wk (ramp in first, then build)")
+                             f"~{chronic:.0f}/wk{ease}")
             elif round(ramp, 1) - round(new_ramp, 1) >= 0.1:
                 fired.append(f"time budget ({week_hours:.1f} h/wk) -> {eff_cap:.0f} TSS")
             ramp, target, weekly_tss = new_ramp, ctl + new_ramp, eff_cap
@@ -347,6 +368,7 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
             "base_ramp": base_ramp, "build_ramp": build_ramp,
             "safe_acute_ratio": safe_ratio,
             "recent_weekly_tss": round(sum(seed[-4:]) / len(seed[-4:])) if seed else None,
+            "readiness": {"objective_form": obj_readiness, "subjective_windows": len(readiness)},
             "block_weeks": block_weeks,
             "family_weeks": {f: sum(1 for r in rows if r["family"] == f)
                              for f in ("base", "build", "peak", "taper")},

@@ -87,6 +87,13 @@ def test_soft_needs_no_inputs():
     assert len(acc) == 1 and acc[0].kind == K.soft
 
 
+def test_soft_item_carries_optional_readiness():
+    # a soft 'fried' read can grade readiness; it still passes the gate (no special input required).
+    it = item(kind=K.soft, quote="Legs feel great", readiness="low")
+    acc, _ = diary.validate_items([it], MSG)
+    assert it in acc and it.readiness == "low"
+
+
 # --- step 3: recurring-theme advisory (non-binding) ---
 def test_recurring_theme_needs_multiple_checkins():
     rows = [

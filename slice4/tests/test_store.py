@@ -37,6 +37,17 @@ def test_season_without_general_goal_defaults_null():
     assert ps.active_season(c)["general_goal"] is None
 
 
+def test_readiness_modifier_round_trip_and_isolation():
+    c = ps.connect(":memory:")
+    ps.create_season(c, "S", "2026-06-01", 7.0, "t")
+    sid = ps.active_season(c)["id"]
+    ps.add_modifier(c, sid, "readiness", "2026-06-08", "2026-06-18", "t", hours=0.3, reason="fried")
+    assert ps.active_readiness(c, sid) == [{"start_date": "2026-06-08", "end_date": "2026-06-18",
+                                            "factor": 0.3, "reason": "fried"}]
+    av, ic = ps.active_modifiers(c, sid)               # readiness must NOT leak into the other lists
+    assert av == [] and ic == []
+
+
 def test_active_modifiers_shape_for_generator():
     c, sid = _conn()
     ps.add_modifier(c, sid, "availability", "2026-06-08", "2026-06-14", "t", hours=12.0, reason="free")

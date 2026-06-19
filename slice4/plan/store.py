@@ -123,10 +123,11 @@ def delete_unavailable(conn, period_id):
 
 
 # --- transient plan modifiers (Slice 4.5) ---
+#   'readiness' stores its 0..1 ease FACTOR in the `hours` column (tighten-only; <=1 always).
 def add_modifier(conn, season_id, kind, start_date, end_date, created_at,
                  hours=None, reason=None, athlete_id=1):
-    if kind not in ("availability", "intensity_cap"):
-        raise ValueError("kind must be 'availability' or 'intensity_cap'")
+    if kind not in ("availability", "intensity_cap", "readiness"):
+        raise ValueError("kind must be 'availability', 'intensity_cap', or 'readiness'")
     cur = conn.execute(
         "INSERT INTO plan_modifier (season_id, athlete_id, kind, start_date, end_date, hours, "
         "reason, active, created_at) VALUES (?,?,?,?,?,?,?,1,?)",
@@ -141,7 +142,7 @@ def deactivate_modifier(conn, modifier_id):
 
 
 def active_modifiers(conn, season_id):
-    """The generator's two transient-input lists, ACTIVE only. Shape matches generate_plan()."""
+    """The generator's transient-input lists, ACTIVE only. Shape matches generate_plan()."""
     rows = conn.execute(
         "SELECT kind, start_date, end_date, hours, reason FROM plan_modifier "
         "WHERE season_id=? AND active=1 ORDER BY start_date", (season_id,))
@@ -149,9 +150,17 @@ def active_modifiers(conn, season_id):
     for kind, s, e, hours, reason in rows:
         if kind == "availability":
             availability.append({"start_date": s, "end_date": e, "hours": hours, "reason": reason})
-        else:
+        elif kind == "intensity_cap":
             intensity_caps.append({"start_date": s, "end_date": e, "reason": reason})
     return availability, intensity_caps
+
+
+def active_readiness(conn, season_id):
+    """ACTIVE subjective-readiness ease windows for the generator: {start,end,factor,reason}."""
+    rows = conn.execute(
+        "SELECT start_date, end_date, hours, reason FROM plan_modifier "
+        "WHERE season_id=? AND active=1 AND kind='readiness' ORDER BY start_date", (season_id,))
+    return [{"start_date": s, "end_date": e, "factor": h, "reason": r} for s, e, h, r in rows]
 
 
 # --- adjustment audit trail + undo (Slice 4.5) ---

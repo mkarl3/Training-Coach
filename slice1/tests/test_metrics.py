@@ -257,6 +257,12 @@ def test_safe_acute_ratio_real_athlete(conn):
     assert r is None or r >= 1.0                        # a ratio, derived from summed actual TSS
 
 
+def test_readiness_from_form_is_a_tighten_only_backstop(conn):
+    m = metrics.Metrics(conn)
+    r = m.readiness_from_form()
+    assert 0.7 <= r <= 1.0                              # 0..1 ease factor, never amplifies
+
+
 def test_projected_days_excluded_from_series(conn):
     m = metrics.Metrics(conn)
     # Daily index ends at the actual horizon; no 2026-08-01 projected row leaks in.

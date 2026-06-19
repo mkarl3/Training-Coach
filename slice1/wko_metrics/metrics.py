@@ -354,6 +354,21 @@ class Metrics:
         return demonstrated_safe_acute_ratio(self.weekly_tss(), self.profile.acwr_min_chronic_load,
                                              percentile)
 
+    def readiness_from_form(self, as_of=None, floor=0.7, low_pct=0.30):
+        """Objective readiness BACKSTOP from current form (TSB), athlete-relative. ~1.0 normally;
+        eases only when TSB sits low in the athlete's OWN range — genuine fatigue they might not
+        report. No-lookahead (TSB up to as_of). Returns a 0..1 factor (it can only tighten)."""
+        tsb = self.tsb.dropna()
+        if tsb.size < 30:
+            return 1.0
+        cur = float(tsb.asof(pd.Timestamp(as_of))) if as_of else float(tsb.iloc[-1])
+        if not np.isfinite(cur):
+            return 1.0
+        pct = float((tsb.values <= cur).mean())          # where today's form sits, 0..1
+        if pct >= low_pct:
+            return 1.0
+        return round(floor + (1.0 - floor) * (pct / low_pct), 2)
+
     def tiz_power_distribution(self):
         return tiz_distribution(self.daily, POWER_ZONE_COLS, self.cfg.tiz_window_days)
 

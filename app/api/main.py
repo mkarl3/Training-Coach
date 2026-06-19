@@ -50,8 +50,10 @@ def _build_plan(conn, m, prof, as_of):
     events = plan_store.events_for(conn, season["id"])
     unavail = plan_store.unavailable_for(conn, season["id"])
     availability, intensity_caps = plan_store.active_modifiers(conn, season["id"])
+    readiness = plan_store.active_readiness(conn, season["id"])
     plan = plan_gen.generate_plan(m, prof, season, events, unavail, as_of,
-                                  availability=availability, intensity_caps=intensity_caps)
+                                  availability=availability, intensity_caps=intensity_caps,
+                                  readiness=readiness)
     return season, plan
 
 
@@ -323,6 +325,13 @@ def _edit_from_item(it):
         return {"target": "intensity_cap", "start_date": start.isoformat(),
                 "end_date": (start + datetime.timedelta(days=7 * max(wks, 1) - 1)).isoformat(),
                 "reason": it.reason or "keep it easy"}
+    # SOFT readiness — a reported feeling that can only EASE the coming days (decays ~10 days).
+    if it.kind.value == "soft" and it.readiness in ("low", "moderate"):
+        ws = _week_start(_S["as_of"])
+        return {"target": "readiness", "start_date": ws.isoformat(),
+                "end_date": (ws + datetime.timedelta(days=10)).isoformat(),
+                "factor": 0.3 if it.readiness == "low" else 0.6,
+                "reason": f"you said \"{it.quote}\""}
     return None
 
 
@@ -332,14 +341,18 @@ def _candidate_plan(edit):
     events = plan_store.events_for(_S["conn"], s["id"])
     unavail = plan_store.unavailable_for(_S["conn"], s["id"])
     availability, intensity_caps = plan_store.active_modifiers(_S["conn"], s["id"])
+    readiness = plan_store.active_readiness(_S["conn"], s["id"])
     if edit["target"] == "unavailable":
         unavail = unavail + [edit]
     elif edit["target"] == "availability":
         availability = availability + [edit]
     elif edit["target"] == "intensity_cap":
         intensity_caps = intensity_caps + [edit]
+    elif edit["target"] == "readiness":
+        readiness = readiness + [edit]
     return plan_gen.generate_plan(_S["m"], _S["profile"], s, events, unavail, _S["as_of"],
-                                  availability=availability, intensity_caps=intensity_caps)
+                                  availability=availability, intensity_caps=intensity_caps,
+                                  readiness=readiness)
 
 
 def _propose(text):
@@ -366,10 +379,13 @@ def _propose(text):
         cand = _candidate_plan(edit)
         if "error" in cand:
             continue
+        kind = "readiness" if edit["target"] == "readiness" else it.kind.value
+        summary = ("Ease the next few days — you're feeling run-down" if kind == "readiness"
+                   else it.summary)
         _S["pending_seq"] += 1
         pid = _S["pending_seq"]
-        _S["pending"][pid] = {"kind": it.kind.value, "summary": it.summary, "edit": edit}
-        proposals.append({"id": pid, "kind": it.kind.value, "summary": it.summary,
+        _S["pending"][pid] = {"kind": kind, "summary": summary, "edit": edit}
+        proposals.append({"id": pid, "kind": kind, "summary": summary,
                           "quote": it.quote, "edit": edit,
                           "diff": plan_gen.diff_plans(plan, cand)})
     return proposals, questions
@@ -450,9 +466,10 @@ def confirm_adjustment(body: ConfirmIn):
                                          reason=e["reason"])
         undo = {"table": "unavailable_period", "id": rid}
     else:
-        kind = "availability" if e["target"] == "availability" else "intensity_cap"
+        kind = e["target"]                            # availability | intensity_cap | readiness
+        val = e.get("hours") if kind == "availability" else (e.get("factor") if kind == "readiness" else None)
         rid = plan_store.add_modifier(_S["conn"], s["id"], kind, e["start_date"], e["end_date"],
-                                      now, hours=e.get("hours"), reason=e["reason"])
+                                      now, hours=val, reason=e.get("reason"))
         undo = {"table": "plan_modifier", "id": rid}
     aid = plan_store.log_adjustment(_S["conn"], s["id"], p["kind"], p["summary"], e, undo, now)
     _refresh_plan()

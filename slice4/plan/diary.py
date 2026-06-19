@@ -74,6 +74,12 @@ class DiaryItem(BaseModel):
                                  "conservative re-entry is; never invent it.")
     reason: str | None = Field(default=None, description="Short free text: 'flu', 'work travel', "
                                "'family away', 'knee'.")
+    readiness: str | None = Field(default=None, description="On a SOFT item only: if the athlete "
+                                  "reports feeling run-down / fatigued / flat / heavy-legged / "
+                                  "poorly-slept / cooked by life, grade it 'low' (clearly fried) or "
+                                  "'moderate' (a bit flat / off). null if they feel fine or great. "
+                                  "This can only EASE training, never add it — and feeling great is "
+                                  "still null (it can't unlock more).")
     clarifying_question: str | None = Field(default=None, description="REQUIRED when kind is "
                                             "'ambiguous': the one question to ask the athlete.")
 
@@ -178,9 +184,10 @@ needs easy weeks"). Set intensity_capped and duration_weeks; reason.
 - hard_capacity_up: a TEMPORARY opportunity to do more ("family's away, I have 12 hours this \
 week"). Extract available_hours and the affected week (start_date). Do NOT promise the athlete \
 all of it — the plan's safety guardrails decide how much is usable; you only note the opening.
-- soft: how they feel — tired, flat, sore, motivated, "I feel great". Informational only. \
-Readiness and enthusiasm are ALWAYS soft: feeling great after time off does NOT justify more \
-load. No dates/hours needed.
+- soft: how they feel — tired, flat, sore, motivated, "I feel great". Informational. Set \
+`readiness` when they sound run-down: 'low' if clearly fried/wrecked/heavy-legged/cooked or badly \
+slept, 'moderate' if a bit flat/off/tired. Leave readiness null if they feel fine OR great — \
+feeling great is still soft and can NEVER unlock more load; readiness only ever EASES training.
 - ambiguous: plan-relevant but underspecified or you are not confident (illness with no idea \
 how long, an injury you can't gauge, a vague "might travel"). Put your single best clarifying \
 question in clarifying_question. Prefer ambiguous over guessing a hard change.
