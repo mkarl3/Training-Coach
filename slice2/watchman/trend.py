@@ -331,7 +331,60 @@ _MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augu
            "September", "October", "November", "December"]
 
 
-def build_trend(m, findings, as_of, top_failures=3, plan=None):
+def _directive(plan, below, chg):
+    """This week's one-line marching order, with the real week-1 target broken out so the UI can
+    emphasise the number."""
+    if plan and plan.get("weeks") and plan["weeks"][0].get("weekly_tss_target"):
+        tss = plan["weeks"][0]["weekly_tss_target"]
+        if below:
+            return {"pre": "This week we start the rebuild — ", "tss": tss,
+                    "post": ", nice and steady. No hero days."}
+        if chg > 1:
+            return {"pre": "This week we keep building — ", "tss": tss,
+                    "post": ", right on your safe ramp."}
+        return {"pre": "This week we hold the line — ", "tss": tss,
+                "post": ". Consistency over heroics."}
+    return {"pre": "Keep it steady and consistent this week.", "tss": None, "post": ""}
+
+
+def _hero(m, as_of, plan, status):
+    """The dashboard hero brief: Wattson's one-line read of right now + this week's directive +
+    glanceable vitals. Same deterministic signals as the now-insight, distilled to a glance."""
+    ao = pd.Timestamp(as_of)
+    ctl = m.daily.loc[m.daily.index <= ao, "ctl"].dropna()
+    if ctl.empty:
+        return None
+    ctl_now = float(ctl.iloc[-1])
+    tsb = m.tsb.dropna()
+    tsb_now = float(tsb.asof(ao)) if not tsb.empty else 0.0
+    recent = ctl[ctl.index > ao - pd.Timedelta(days=28)]
+    chg = float(recent.iloc[-1] - recent.iloc[0]) if len(recent) >= 2 else 0.0
+    thr = m.ctl_percentile_threshold(m.profile.detraining_pctile, as_of=True).asof(ao)
+    below = (thr is not None) and (not pd.isna(thr)) and (ctl_now < float(thr))
+
+    if below and tsb_now > 0:
+        headline, mood = "You're fresh, but light on fitness right now.", "calm"
+    elif below:
+        headline, mood = "Fitness is down — time to rebuild.", "calm"
+    elif chg > 1:
+        headline, mood = "Fitness is climbing, and you're absorbing it.", "approving"
+    else:
+        headline, mood = "Holding steady — fitness banked and maintained.", "calm"
+    if status == "alert":
+        mood = "alarmed"
+
+    fdir = "rising" if chg > 1 else "sliding" if chg < -1 else "holding"
+    form_lab = "fresh" if tsb_now > 5 else "run down" if tsb_now < -15 else "neutral"
+    accent = {"green": "good", "alert": "alarm"}.get(status, "watch")
+    return {
+        "mood": mood, "status": status or "watch", "accent": accent,
+        "headline": headline, "directive": _directive(plan, below, chg),
+        "vitals": {"fitness": {"value": round(ctl_now), "dir": fdir},
+                   "form": {"value": round(tsb_now), "label": form_lab}},
+    }
+
+
+def build_trend(m, findings, as_of, top_failures=3, plan=None, status=None):
     """Assemble the full trend-view payload for `as_of`. `plan` (optional) supplies the training
     blocks (hover scrubber), the live prescription (now-insight), and the forward projection."""
     as_of = pd.Timestamp(as_of).strftime("%Y-%m-%d")
@@ -356,6 +409,7 @@ def build_trend(m, findings, as_of, top_failures=3, plan=None):
         "as_of": as_of,
         "date_min": series[0]["date"] if series else as_of,
         "safe_ramp": round(float(safe_ramp), 1),
+        "hero": _hero(m, as_of, plan, status),
         "series": series,
         "projection": projection,
         "insights": insights,

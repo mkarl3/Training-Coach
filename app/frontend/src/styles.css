@@ -282,6 +282,30 @@ textarea:focus { outline: 2px solid var(--jacket); }
   padding: 26px 18px; text-align: center; font-size: 13px; cursor: pointer; user-select: none; }
 .ob-drop.over { border-color: var(--gold); color: var(--cream); background: rgba(247,213,29,0.06); }
 
+/* ---- dashboard hero bar (Wattson's brief) ---- */
+.hero-bar { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--gold);
+  border-radius: 12px; padding: 14px 18px; margin: 4px 6px 16px; display: flex; align-items: center;
+  gap: 18px; flex-wrap: wrap; }
+.hero-avatar { flex: 0 0 auto; width: 66px; height: 66px; border-radius: 12px; background: var(--bg);
+  border: 1px solid var(--line); overflow: hidden; display: flex; align-items: flex-start; justify-content: center; }
+.hero-avatar svg { width: 62px; height: 62px; }
+.hero-msg { flex: 1; min-width: 220px; }
+.hero-coach { font-family: var(--data); font-size: 10.5px; letter-spacing: 0.06em; color: var(--gold); margin-bottom: 2px; }
+.hero-headline { font-size: 17px; color: var(--cream); line-height: 1.25; }
+.hero-directive { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; }
+.hero-directive b { color: var(--cream); font-weight: 600; }
+.hero-right { display: flex; align-items: center; gap: 16px; flex: 0 0 auto; }
+.hero-vital { text-align: center; min-width: 60px; }
+.hero-vital .hv-lab { font-family: var(--data); font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-3); }
+.hero-vital .hv-val { font-family: var(--data); font-size: 21px; font-weight: 600; line-height: 1.2; }
+.hero-vital .hv-sub { font-size: 9.5px; color: var(--ink-3); }
+.hero-vdiv { width: 1px; height: 42px; background: var(--line); }
+.hero-cta { display: flex; flex-direction: column; gap: 6px; margin-left: 4px; }
+.hero-btn { font-family: var(--ui); font-size: 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.hero-btn.primary { font-weight: 500; color: var(--bg); background: var(--gold); border: 0; padding: 7px 13px; }
+.hero-btn.ghost { color: var(--ink-2); background: transparent; border: 1px solid var(--line); padding: 6px 13px; }
+.hero-btn i { font-size: 13px; vertical-align: -2px; margin-right: 3px; }
+
 /* ---- fitness-trend dashboard (integrated PMC + Wattson read) ---- */
 .trend-grid { display: grid; grid-template-columns: minmax(0, 760px) minmax(300px, 440px);
   gap: 20px; align-items: stretch; justify-content: start; }

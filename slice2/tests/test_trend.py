@@ -15,7 +15,7 @@ def _as_of(m):
 
 def test_payload_shape(m, findings):
     t = build_trend(m, findings, _as_of(m))
-    assert set(t) == {"as_of", "date_min", "safe_ramp", "series", "projection", "insights"}
+    assert set(t) == {"as_of", "date_min", "safe_ramp", "hero", "series", "projection", "insights"}
     assert isinstance(t["safe_ramp"], float) and t["safe_ramp"] > 0
     assert t["series"] and t["date_min"] == t["series"][0]["date"]
     assert t["projection"] is None                          # no plan passed -> no projection
@@ -64,6 +64,24 @@ def test_projection_and_prescription_from_plan(m, findings):
     now = next(i for i in t["insights"] if i["id"] == "now")
     assert "185" in now["act"] and "61" in now["act"]       # real prescription numbers
     assert now["cta"] is True and now["proj"]               # CTA + projection line present
+
+
+def test_hero_brief_shape(m, findings):
+    plan = {"meta": {}, "weeks": [{"week_start": "2026-06-22", "week_end": "2026-06-28",
+                                   "weekly_tss_target": 185, "single_ride_tss_cap": 61,
+                                   "ctl_target": 20.2}]}
+    h = build_trend(m, findings, _as_of(m), plan=plan, status="watch")["hero"]
+    assert h["mood"] in ("alarmed", "approving", "calm")
+    assert h["accent"] in ("good", "watch", "alarm") and h["headline"]
+    assert h["directive"]["tss"] == 185                     # real week-1 target broken out
+    assert h["vitals"]["fitness"]["dir"] in ("rising", "sliding", "holding")
+    assert isinstance(h["vitals"]["fitness"]["value"], int)
+    assert "label" in h["vitals"]["form"]
+
+
+def test_hero_directive_generic_without_plan(m, findings):
+    h = build_trend(m, findings, _as_of(m))["hero"]
+    assert h["directive"]["tss"] is None                    # no plan -> no number, generic line
 
 
 def test_series_does_not_exceed_as_of(m, findings):

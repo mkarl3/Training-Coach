@@ -240,7 +240,7 @@ def trend(as_of: str = Query(None)):
     ao = as_of or _S["as_of"]
     if not (_S["date_min"] <= ao <= _S["as_of"]):
         raise HTTPException(400, f"as_of must be in [{_S['date_min']}, {_S['as_of']}]")
-    return build_trend(_S["m"], _S["findings"], ao, plan=_S.get("plan"))
+    return build_trend(_S["m"], _S["findings"], ao, plan=_S.get("plan"), status=_S.get("status"))
 
 
 # ---------------- coach ----------------
