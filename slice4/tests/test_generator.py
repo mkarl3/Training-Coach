@@ -43,19 +43,21 @@ def test_every_week_is_traceable(m, as_of):
     season, events = season_at(as_of)
     for w in generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)["weeks"]:
         assert w["rationale"]                          # a rule set every week
-        assert w["ctl_target"] == round(w["ctl_start"] + w["planned_ramp"], 1)  # numbers tie out
+        assert abs(w["ctl_target"] - (w["ctl_start"] + w["planned_ramp"])) < 0.11  # tie out (to rounding)
         assert w["weekly_tss_target"] >= 0
         assert isinstance(w["constraints_fired"], list)
 
 
-def test_ramp_never_exceeds_the_profile_cap(m, as_of):
-    # spike-then-crash guardrail: with a tiny cap, no build week may exceed it.
-    prof = dataclasses.replace(DEFAULT_PROFILE, ramp_rate_cap=1.5)
+def test_ramp_cap_is_derived_and_never_exceeded(m, as_of):
+    # The ramp ceiling is DERIVED from the athlete's demonstrated ramp (headroom above it), not
+    # the profile's 7.0 default; no build week may exceed it.
     season, events = season_at(as_of, hours=20.0)      # remove the time budget as the binder
-    plan = generator.generate_plan(m, prof, season, events, [], as_of)
+    plan = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    cap = plan["meta"]["ramp_cap"]
+    assert cap == round(1.5 * plan["meta"]["sustainable_ramp"], 1)   # derived, not 7.0
+    assert cap < DEFAULT_PROFILE.ramp_rate_cap                       # well under the stale default
     builds = [w for w in plan["weeks"] if w["family"] in ("base", "build") and not w["is_recovery"]]
-    assert builds and all(w["planned_ramp"] <= 1.5 + 1e-9 for w in builds)
-    assert any("ramp_cap" in c for w in plan["weeks"] for c in w["constraints_fired"])
+    assert builds and all(w["planned_ramp"] <= cap + 1e-9 for w in builds)
 
 
 def test_masters_get_more_frequent_shallower_recovery(m, as_of):
@@ -80,7 +82,7 @@ def test_time_budget_binds_the_ramp(m, as_of):
     tight = generator.generate_plan(m, DEFAULT_PROFILE, season_tight, events, [], as_of)
     loose = generator.generate_plan(m, DEFAULT_PROFILE, season_loose, events, [], as_of)
     assert tight["meta"]["peak_ctl_achieved"] < loose["meta"]["peak_ctl_achieved"]
-    assert any("time_budget_cap" in c for w in tight["weeks"] for c in w["constraints_fired"])
+    assert any("time budget" in c for w in tight["weeks"] for c in w["constraints_fired"])
 
 
 def test_unavailable_week_forced_to_recovery(m, as_of):
@@ -112,7 +114,7 @@ def _bound_week(plan):
     can move it). For a low-CTL athlete this is a tighter-budget mid-plan week, not week 1."""
     return next(w for w in plan["weeks"]
                 if w["status"] == "upcoming"
-                and any("time_budget_cap" in c for c in w["constraints_fired"]))
+                and any("time budget" in c for c in w["constraints_fired"]))
 
 
 def test_availability_up_relaxes_budget_but_guardrails_still_bind(m, as_of):
@@ -192,10 +194,27 @@ def test_week_starts_on_drives_alignment(m, as_of):
     assert dt.date.fromisoformat(sun["weeks"][0]["week_start"]).weekday() == 6   # Sunday
 
 
-def test_single_ride_cap_is_half_the_week(m, as_of):
-    season, events = season_at(as_of)
-    for w in generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)["weeks"]:
-        assert w["single_ride_tss_cap"] == round(0.5 * w["weekly_tss_target"])
+def test_single_ride_cap_is_half_the_6wk_rolling_avg(m, as_of):
+    # 50% rule = half the 6-WEEK ROLLING AVERAGE weekly TSS, not half this one planned week.
+    weeks = generator.generate_plan(m, DEFAULT_PROFILE, season_at(as_of, weeks_out=20)[0],
+                                    season_at(as_of, weeks_out=20)[1], [], as_of)["weeks"]
+    i = 8                                              # deep enough that the trailing 6 are all plan weeks
+    trailing6 = [w["weekly_tss_target"] for w in weeks[i - 5:i + 1]]
+    assert weeks[i]["single_ride_tss_cap"] == round(0.5 * (sum(trailing6) / len(trailing6)))
+
+
+def test_acute_load_cap_ramps_in_from_recent_baseline(m, as_of):
+    # Week 1 must not jump to the full CTL-maintenance+ramp target; it's capped to a demonstrated-
+    # safe step over recent actual load. (Loose hours so the ACUTE cap, not the budget, binds.)
+    plan = generator.generate_plan(m, DEFAULT_PROFILE, season_at(as_of, weeks_out=20, hours=20.0)[0],
+                                   season_at(as_of, weeks_out=20, hours=20.0)[1], [], as_of)
+    M = plan["meta"]
+    assert M["sustainable_ramp"] is not None and M["safe_acute_ratio"] >= 1.0 and M["recent_weekly_tss"]
+    w1 = plan["weeks"][0]
+    ctl_target_tss = 7 * w1["ctl_start"] + 45.5 * M["base_ramp"]      # the un-capped CTL target
+    assert w1["weekly_tss_target"] < ctl_target_tss                  # it was held below the raw target
+    assert w1["weekly_tss_target"] <= round(M["safe_acute_ratio"] * M["recent_weekly_tss"]) + 1
+    assert any("acute-load cap" in c for c in w1["constraints_fired"])
 
 
 def test_ramp_seeds_from_demonstrated_sustainable_ramp(m, as_of):

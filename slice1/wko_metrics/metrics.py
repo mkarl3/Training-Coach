@@ -159,6 +159,36 @@ def demonstrated_sustainable_ramp(weekly_ctl, floor_weekly, ramp_cap,
     return round(min(float(np.percentile(safe, percentile)), ramp_cap), 1)
 
 
+def demonstrated_safe_acute_ratio(weekly_tss, min_chronic, percentile=75.0,
+                                  hold_weeks=3, giveback_frac=0.5):
+    """The DEMONSTRATED-SAFE acute jump — how big a single week's load this athlete can pile on
+    over their recent baseline WITHOUT it leading to a crash. Same discipline as the sustainable
+    ramp: it's NOT their historical max (that includes the spikes that broke them).
+
+    For each week, ratio = that week's TSS / the prior 4-week average ('how much harder than
+    you'd recently been training'). Keep only step-UP weeks whose load was then SUSTAINED (not
+    given back beyond `giveback_frac` within `hold_weeks` — i.e. it didn't precede a collapse),
+    over a meaningful chronic base (>= min_chronic). Report the `percentile`th of those safe
+    ratios. None when history can't demonstrate one. Pure: weekly TSS in, scalar (or None) out.
+    """
+    wk = weekly_tss.dropna()
+    if wk.size < hold_weeks + 5:
+        return None
+    v = wk.values
+    safe = []
+    for i in range(4, len(wk)):
+        chronic = float(v[i - 4:i].mean())
+        if chronic < min_chronic or v[i] <= chronic:          # only genuine step-ups over a real base
+            continue
+        future = v[i + 1:i + 1 + hold_weeks]
+        if future.size and float(np.nanmin(future)) < giveback_frac * v[i]:
+            continue                                          # load collapsed after -> spike-then-crash
+        safe.append(v[i] / chronic)
+    if not safe:
+        return None
+    return round(float(np.percentile(safe, percentile)), 2)
+
+
 def trailing_zero_ride_streak(has_ride):
     """Per-day count of consecutive trailing has_ride==0 days (0 on a ride day).
     A gap is has_ride==0, NOT tss_sum==0 (a logged ride with missing TSS is not a gap)."""
@@ -313,6 +343,16 @@ class Metrics:
         floor_wk = self.personal_ctl_floor().resample("W").last().reindex(wk.index).ffill()
         return demonstrated_sustainable_ramp(
             wk, floor_wk, self.profile.ramp_rate_cap, percentile, hold_weeks, giveback_frac)
+
+    def weekly_tss(self):
+        """Actual weekly TSS (summed from per-workout/daily TSS — no CTL math involved)."""
+        return self.daily["tss_sum"].astype(float).resample("W").sum()
+
+    def personal_safe_acute_ratio(self, percentile=75.0):
+        """The athlete's DEMONSTRATED-SAFE acute jump (this-week-TSS / recent-baseline) that didn't
+        precede a crash — derived from summed actual TSS, not a literature constant."""
+        return demonstrated_safe_acute_ratio(self.weekly_tss(), self.profile.acwr_min_chronic_load,
+                                             percentile)
 
     def tiz_power_distribution(self):
         return tiz_distribution(self.daily, POWER_ZONE_COLS, self.cfg.tiz_window_days)

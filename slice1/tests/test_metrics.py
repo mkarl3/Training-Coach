@@ -239,6 +239,24 @@ def test_sustainable_ramp_real_athlete(conn):
     assert m.personal_sustainable_ramp() == m.personal_sustainable_ramp()   # deterministic
 
 
+def test_safe_acute_ratio_excludes_the_crash():
+    # one step-up that HELD (safe) and one of the same size that COLLAPSED after (spike-then-crash).
+    # Only the sustained one counts -> the demonstrated-safe ratio is the safe jump, not the crash.
+    wk = pd.date_range("2025-01-05", periods=13, freq="W")
+    tss = pd.Series([100, 100, 100, 100, 150,           # +50% jump that HOLDS -> safe (1.5)
+                     100, 100, 100, 100, 150,           # +50% jump that then...
+                     60, 60, 60],                       # ...COLLAPSES -> excluded
+                    index=wk, dtype=float)
+    assert metrics.demonstrated_safe_acute_ratio(tss, min_chronic=20, percentile=75) == 1.5
+    assert metrics.demonstrated_safe_acute_ratio(tss.iloc[:5], min_chronic=20) is None   # thin history
+
+
+def test_safe_acute_ratio_real_athlete(conn):
+    m = metrics.Metrics(conn)
+    r = m.personal_safe_acute_ratio()
+    assert r is None or r >= 1.0                        # a ratio, derived from summed actual TSS
+
+
 def test_projected_days_excluded_from_series(conn):
     m = metrics.Metrics(conn)
     # Daily index ends at the actual horizon; no 2026-08-01 projected row leaks in.

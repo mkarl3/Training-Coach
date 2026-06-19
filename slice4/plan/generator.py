@@ -146,7 +146,6 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
     floor = float(m.personal_ctl_floor().iloc[-1])
     target_peak_ctl = max(floor, anchor_ctl + 3.0)
     masters = profile.is_masters(a_date.year)
-    ramp_cap = profile.ramp_rate_cap
     budget_h = season["weekly_hours_budget"]
     label, plan_if, distribution, long_priority = cfg.emphasis.get(
         a_race["event_type"], cfg.default_emphasis)
@@ -190,6 +189,26 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
     build_ramp = (round(base_ramp * cfg.ramp_build / cfg.ramp_base, 1)
                   if psr is not None else cfg.ramp_build)
     family_ramp = {"base": base_ramp, "build": build_ramp, "peak": cfg.ramp_peak}
+
+    # ramp CEILING derived from the athlete's demonstrated ramp (headroom above their sustainable
+    # target), NOT a generic default; falls back to the profile cap only if history is thin.
+    ramp_cap = round(1.5 * psr, 1) if psr is not None else profile.ramp_rate_cap
+
+    # acute-load guardrail: the athlete's demonstrated-safe weekly JUMP over their recent baseline.
+    # Bounds how fast prescribed load can rise off a gap / under-training — the place a CTL-slope
+    # cap can't see the spike. Derived from summed actual TSS; conservative default if history thin.
+    safe_ratio = m.personal_safe_acute_ratio() or 1.3
+
+    # recent-load baselines from SUMMED ACTUAL weekly TSS before plan start (drop empty weeks).
+    # load_hist drives the acute cap (recent ~4-wk avg) AND the 50% single-ride rule (rolling
+    # ~6-wk avg). Prescribed weeks append as the plan builds, so both caps roll forward.
+    seed = []
+    for k in range(6, 0, -1):
+        ws = plan_start - dt.timedelta(days=7 * k)
+        s = daily.loc[ws.isoformat():(ws + dt.timedelta(days=6)).isoformat(), "tss_sum"].dropna().sum()
+        if s > 0:
+            seed.append(round(float(s)))
+    load_hist = list(seed)
 
     rows = []
     ctl = anchor_ctl
@@ -240,19 +259,25 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
             fired.append(f"intensity cap ({icap.get('reason') or 'easy'}) -> aerobic only, hold CTL")
 
         target = ctl + ramp
-        weekly_tss = 7 * ctl + ramp_coef * ramp
-        # 6. time-budget cap — binds the achievable ramp. A per-week availability override (diary)
-        #    replaces the season budget for the overlapping week; UP just lets the next guardrail
-        #    (ramp cap / target) bind instead, DOWN tightens.
+        weekly_tss = 7 * ctl + ramp_coef * ramp           # CTL-derived target load for this ramp
+        # 6. caps — the most restrictive of (acute-load step, time budget) re-derives the ramp.
+        #    ACUTE: don't pile on more than a demonstrated-safe step over the recent baseline — this
+        #    catches the re-entry spike a CTL-slope cap can't see. TIME: real available hours.
+        #    A per-week availability override (diary) swaps the season budget for that week.
         av = _overlaps(mon, we, availability)
         week_hours = av["hours"] if av else budget_h
-        max_tss = week_hours * if2 * 100.0
-        if weekly_tss > max_tss and not ua:
-            new_ramp = (max_tss - 7 * ctl) / ramp_coef
-            if round(ramp, 1) - round(new_ramp, 1) >= 0.1:
-                fired.append(f"time_budget_cap {weekly_tss:.0f}->{max_tss:.0f} TSS "
-                             f"({week_hours:.1f} h @ IF {plan_if}) -> ramp {ramp:+.1f}->{new_ramp:+.1f}")
-            ramp, target, weekly_tss = new_ramp, ctl + new_ramp, max_tss
+        budget_cap = week_hours * if2 * 100.0
+        chronic = (sum(load_hist[-4:]) / len(load_hist[-4:])) if load_hist else 0.0
+        acute_cap = (safe_ratio * chronic) if chronic >= profile.acwr_min_chronic_load else float("inf")
+        eff_cap = min(budget_cap, acute_cap)
+        if weekly_tss > eff_cap and not ua:
+            new_ramp = (eff_cap - 7 * ctl) / ramp_coef
+            if acute_cap <= budget_cap:
+                fired.append(f"acute-load cap -> {eff_cap:.0f} TSS: a safe step up from your recent "
+                             f"~{chronic:.0f}/wk (ramp in first, then build)")
+            elif round(ramp, 1) - round(new_ramp, 1) >= 0.1:
+                fired.append(f"time budget ({week_hours:.1f} h/wk) -> {eff_cap:.0f} TSS")
+            ramp, target, weekly_tss = new_ramp, ctl + new_ramp, eff_cap
         if av:
             fired.append(f"availability override {week_hours:.1f} h ({av.get('reason') or 'this week'}) "
                          f"— guardrails still bind the usable load")
@@ -260,9 +285,12 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
         est_hours = weekly_tss / (if2 * 100.0)
         long_ride = (cfg.long_ride_hours.get(family) if long_priority and family in ("base", "build", "peak")
                      else None)
-        # 50% rule: no single ride above half the week's TSS (TrainerRoad dataset analysis)
         weekly_tss_target = round(weekly_tss)
-        single_ride_cap = round(cfg.single_ride_cap_frac * weekly_tss_target)
+        # 50% rule (TrainerRoad dataset analysis): no single ride above half your 6-WEEK ROLLING
+        # AVERAGE weekly TSS — relative to your established load, not this one planned week.
+        load_hist.append(weekly_tss_target)
+        six_wk_avg = sum(load_hist[-6:]) / len(load_hist[-6:])
+        single_ride_cap = round(cfg.single_ride_cap_frac * six_wk_avg)
         # monotony guardrail fires on training weeks (where distribution is steerable)
         if monotony_prone and not is_recovery and family != "taper":
             fired.append(mono_note)
@@ -317,6 +345,8 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
             "masters": masters, "ramp_cap": ramp_cap, "weekly_hours_budget": budget_h,
             "sustainable_ramp": psr, "ramp_source": ramp_source,
             "base_ramp": base_ramp, "build_ramp": build_ramp,
+            "safe_acute_ratio": safe_ratio,
+            "recent_weekly_tss": round(sum(seed[-4:]) / len(seed[-4:])) if seed else None,
             "block_weeks": block_weeks,
             "family_weeks": {f: sum(1 for r in rows if r["family"] == f)
                              for f in ("base", "build", "peak", "taper")},
