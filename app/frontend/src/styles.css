@@ -19,7 +19,7 @@
   --ink: var(--cream); --muted: var(--ink-2); --line: #2b3a63; --accent: var(--jacket); --amber: var(--gold);
   --ctl: var(--green); --atl: var(--gold); --tsb: var(--blue); --prov: rgba(120,140,200,0.12);
   /* fitness-trend ramp states + volume bars */
-  --ramp-hot: #ff7a45; --ramp-hold: #9fb0d8; --ramp-lose: #e06b6b; --bar: rgba(120,140,200,0.18);
+  --ramp-hot: #ff7a45; --ramp-hold: #9fb0d8; --ramp-lose: #e06b6b; --bar: rgba(140,162,214,0.42);
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
@@ -286,6 +286,16 @@ textarea:focus { outline: 2px solid var(--jacket); }
 .trend-grid { display: grid; grid-template-columns: minmax(0, 760px) minmax(300px, 440px);
   gap: 20px; align-items: stretch; justify-content: start; }
 .trend-left { min-width: 0; }
+.chart-wrap { position: relative; padding-top: 56px; }
+.chart-tip { position: absolute; top: 0; transform: translateX(-50%); pointer-events: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 11px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.45); z-index: 5; white-space: nowrap; text-align: center; }
+.chart-tip .tip-date { font-family: var(--data); font-size: 11.5px; color: var(--cream); font-weight: 600; }
+.chart-tip .tip-block { font-family: var(--ui); font-size: 10px; color: var(--bg); background: var(--gold);
+  padding: 1px 6px; border-radius: 5px; margin-left: 6px; }
+.chart-tip .tip-rows { display: flex; gap: 12px; justify-content: center; margin-top: 3px; }
+.chart-tip .tip-rows span { font-family: var(--ui); font-size: 11px; color: var(--ink-2); }
+.chart-tip .tip-rows b { font-family: var(--data); font-size: 11.5px; color: var(--cream); font-weight: 600; }
 .trend-right { display: flex; min-width: 0; }
 .trend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .range-bar { display: flex; gap: 6px; }

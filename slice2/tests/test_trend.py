@@ -31,6 +31,26 @@ def test_series_is_weekly_ascending_with_ctl_and_tss(m, findings):
     assert gaps == {7}
 
 
+def test_series_points_carry_form_and_block_key(m, findings):
+    s = build_trend(m, findings, _as_of(m))["series"]
+    for r in s:
+        assert "tsb" in r and (r["tsb"] is None or isinstance(r["tsb"], float))
+        assert "block" in r and r["block"] is None        # no plan_weeks passed -> always None
+
+
+def test_blocks_attach_when_plan_covers_a_week(m, findings):
+    # synthesize a plan covering the last two series weeks (plan week_start = series Sunday - 6d)
+    s0 = build_trend(m, findings, _as_of(m))["series"]
+    import datetime as dt
+    mondays = [(dt.date.fromisoformat(s0[-1]["date"]) - dt.timedelta(days=6)).isoformat(),
+               (dt.date.fromisoformat(s0[-2]["date"]) - dt.timedelta(days=6)).isoformat()]
+    plan_weeks = [{"week_start": mondays[0], "block": "Build 2"},
+                  {"week_start": mondays[1], "block": "Build 2"}]
+    s = build_trend(m, findings, _as_of(m), plan_weeks=plan_weeks)["series"]
+    assert s[-1]["block"] == "Build 2" and s[-2]["block"] == "Build 2"
+    assert s[0]["block"] is None                           # uncovered weeks stay None
+
+
 def test_series_does_not_exceed_as_of(m, findings):
     as_of = m.daily.index.min() + pd.Timedelta(days=400)     # a mid-history cutoff
     t = build_trend(m, findings, as_of.strftime("%Y-%m-%d"))

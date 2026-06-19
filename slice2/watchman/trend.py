@@ -34,18 +34,35 @@ def _d(s):
 
 
 def weekly_series(m, as_of):
-    """Weekly CTL (end-of-week) + summed weekly TSS, up to as_of. The trend instrument's spine."""
+    """Weekly CTL (end-of-week) + summed weekly TSS + end-of-week form (TSB), up to as_of.
+    The trend instrument's spine, plus the topline numbers the hover scrubber reads."""
     ao = pd.Timestamp(as_of)
     ctl = m.weekly_ctl().dropna()
     tss = m.weekly_tss()
+    tsb = m.tsb.resample("W").last()
     out = []
     for wk, c in ctl.items():
         if wk > ao + pd.Timedelta(days=6):
             continue
+        tv = tsb.get(wk)
         out.append({"date": wk.strftime("%Y-%m-%d"),
                     "ctl": round(float(c), 1),
-                    "tss": int(round(float(tss.get(wk, 0.0) or 0.0)))})
+                    "tss": int(round(float(tss.get(wk, 0.0) or 0.0))),
+                    "tsb": None if tv is None or pd.isna(tv) else round(float(tv), 1),
+                    "block": None})
     return out
+
+
+def _attach_blocks(series, plan_weeks):
+    """Label each weekly point with its training block when the plan covers it (season is often
+    future, so this is frequently empty — by design: 'if it exists')."""
+    if not plan_weeks:
+        return
+    by_monday = {w["week_start"]: w.get("block") for w in plan_weeks}
+    for pt in series:
+        # the series week ends Sunday; its Monday (the plan's week_start key) is six days back
+        monday = (dt.date.fromisoformat(pt["date"]) - dt.timedelta(days=6)).isoformat()
+        pt["block"] = by_monday.get(monday) or by_monday.get(pt["date"])
 
 
 def _episodes(findings):
@@ -254,8 +271,9 @@ def _strength_insight(m, as_of, safe_ramp):
             "plan": f"Anchors your safe ramp of ~{round(safe_ramp, 1)} fitness/week."}
 
 
-def build_trend(m, findings, as_of, top_failures=3):
-    """Assemble the full trend-view payload for `as_of`."""
+def build_trend(m, findings, as_of, top_failures=3, plan_weeks=None):
+    """Assemble the full trend-view payload for `as_of`. `plan_weeks` (optional) lets the hover
+    scrubber show the training block a week belongs to, where the plan covers it."""
     as_of = pd.Timestamp(as_of).strftime("%Y-%m-%d")
     safe_ramp = m.personal_sustainable_ramp()
     if safe_ramp is None:
@@ -270,6 +288,7 @@ def build_trend(m, findings, as_of, top_failures=3):
         insights.append(strength)
 
     series = weekly_series(m, as_of)
+    _attach_blocks(series, plan_weeks)
     return {
         "as_of": as_of,
         "date_min": series[0]["date"] if series else as_of,

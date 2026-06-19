@@ -29,6 +29,7 @@ function segColor(slope, safe) {
 }
 
 function Chart({ data, safe, insights, sel, onSel }) {
+  const [hover, setHover] = useState(null);
   const W = 760, H = 200, pL = 34, pR = 14, pT = 12, pB = 26;
   const plotW = W - pL - pR, plotH = H - pT - pB;
   if (data.length < 2) return <div className="empty-ok">Not enough history yet — keep logging rides.</div>;
@@ -49,9 +50,21 @@ function Chart({ data, safe, insights, sel, onSel }) {
   const step = Math.max(1, Math.ceil(data.length / 7));
   let seenMonth = -1;
 
+  const onMove = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const vbX = ((e.clientX - r.left) / r.width) * W;
+    let i = Math.round(((vbX - pL) / plotW) * (data.length - 1));
+    setHover(Math.max(0, Math.min(data.length - 1, i)));
+  };
+  const hd = hover != null ? data[hover] : null;
+  const hramp = hover ? data[hover].ctl - data[hover - 1].ctl : 0;
+  const leftPct = hover != null ? Math.max(15, Math.min(85, (X(hover) / W) * 100)) : 0;
+
   return (
+    <div className="chart-wrap">
     <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
-      style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Fitness trend">
+      style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label="Fitness trend"
+      onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
       <rect width={W} height={H} fill="var(--panel-3)" rx="8" />
       {data.map((d, i) => {
         const h = (d.tss / barMax) * plotH * 0.5;
@@ -100,9 +113,40 @@ function Chart({ data, safe, insights, sel, onSel }) {
           </g>
         );
       })}
+      {hd && (
+        <g pointerEvents="none">
+          <line x1={X(hover)} y1={pT} x2={X(hover)} y2={H - pB} stroke="var(--ink-2)"
+            strokeWidth="1" strokeDasharray="3 3" opacity="0.55" />
+          <circle cx={X(hover)} cy={Y(hd.ctl)} r="4" fill="var(--cream)" stroke="var(--bg)" strokeWidth="1.5" />
+        </g>
+      )}
     </svg>
+    {hd && (
+      <div className="chart-tip" style={{ left: leftPct + "%" }}>
+        <div className="tip-date">Week of {fmtDate(addDays(hd.date, -6))}
+          {hd.block && <span className="tip-block">{hd.block}</span>}
+        </div>
+        <div className="tip-rows">
+          <span>TSS <b>{hd.tss}</b></span>
+          <span>Fitness <b>{Math.round(hd.ctl)}</b></span>
+          {hd.tsb != null && <span>Form <b>{hd.tsb >= 0 ? "+" : ""}{Math.round(hd.tsb)}</b></span>}
+          <span style={{ color: rampState(hramp, safe).c }}>
+            {hramp >= 0 ? "+" : ""}{hramp.toFixed(1)}/wk · {rampState(hramp, safe).w}</span>
+        </div>
+      </div>
+    )}
+    </div>
   );
 }
+
+function rampState(r, safe) {
+  if (r < -0.4) return { w: "losing fitness", c: STATE.lose };
+  if (r > safe + 0.3) return { w: "ramping hot", c: STATE.hot };
+  if (r > 0.4) return { w: "building", c: STATE.build };
+  return { w: "holding", c: STATE.hold };
+}
+function addDays(iso, n) { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+function fmtDate(iso) { const d = new Date(iso + "T00:00:00"); return `${MON[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`; }
 
 // snap an insight's anchor/zone date to the nearest weekly bucket present in the series
 function nearestWeek(date, data) {
