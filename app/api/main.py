@@ -30,6 +30,7 @@ from coach import store, capture as coach_capture     # noqa: E402
 from coach.orchestrator import Coach                   # noqa: E402
 from coach.retrieval import MethodologyIndex           # noqa: E402
 from plan import store as plan_store, generator as plan_gen, diary as plan_diary, review as plan_review  # noqa: E402
+from plan import progression as plan_progression  # noqa: E402
 
 WKO_DB = os.environ.get("WKO_DB", os.path.join(ROOT, "slice0", "wko.db"))
 EXPORTS_DIR = os.path.join(ROOT, "WKO5 Exports")
@@ -51,9 +52,10 @@ def _build_plan(conn, m, prof, as_of):
     unavail = plan_store.unavailable_for(conn, season["id"])
     availability, intensity_caps = plan_store.active_modifiers(conn, season["id"])
     readiness = plan_store.active_readiness(conn, season["id"])
+    holds = plan_store.active_block_holds(conn, season["id"])
     plan = plan_gen.generate_plan(m, prof, season, events, unavail, as_of,
                                   availability=availability, intensity_caps=intensity_caps,
-                                  readiness=readiness)
+                                  readiness=readiness, holds=holds)
     return season, plan
 
 
@@ -243,6 +245,43 @@ def trend(as_of: str = Query(None)):
     return build_trend(_S["m"], _S["findings"], ao, plan=_S.get("plan"), status=_S.get("status"))
 
 
+@app.get("/api/progression")
+def progression(as_of: str = Query(None)):
+    """Slice 5 — the deterministic phase-progression assessment (gate + verdict + contingency).
+    Advises; never recomputes. Returns {state:'no_plan'} when there's no active plan."""
+    _require_loaded()
+    ao = as_of or _S["as_of"]
+    return plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
+
+
+class HoldIn(BaseModel):
+    block: str
+    weeks: int = 1
+
+
+@app.post("/api/progression/hold")
+def progression_hold(body: HoldIn):
+    """Apply a phase-progression HOLD: extend `block` by `weeks` (stolen from later base/build
+    blocks — the honest cost) and recompute. Returns the diff. Undoable via the adjustment path."""
+    _require_loaded()
+    s = _S.get("season")
+    if not s or not _S.get("plan"):
+        raise HTTPException(400, "no active plan")
+    if body.block not in {w["block"] for w in _S["plan"]["weeks"]}:
+        raise HTTPException(400, f"unknown block {body.block!r}")
+    weeks = max(1, min(2, body.weeks))
+    edit = {"target": "block_hold", "block": body.block, "weeks": weeks}
+    diff = plan_gen.diff_plans(_S["plan"], _candidate_plan(edit))
+    now = datetime.datetime.now().replace(microsecond=0).isoformat()
+    rid = plan_store.add_modifier(_S["conn"], s["id"], "block_hold", s["start_date"],
+                                  s["start_date"], now, hours=weeks, reason=body.block)
+    summary = f"Hold {body.block} +{weeks} wk"
+    aid = plan_store.log_adjustment(_S["conn"], s["id"], "phase_hold", summary, edit,
+                                    {"table": "plan_modifier", "id": rid}, now)
+    _refresh_plan()
+    return {"applied": summary, "adjustment_id": aid, "diff": diff, "plan": _S["plan"]}
+
+
 # ---------------- coach ----------------
 class MessageIn(BaseModel):
     text: str
@@ -354,6 +393,7 @@ def _candidate_plan(edit):
     unavail = plan_store.unavailable_for(_S["conn"], s["id"])
     availability, intensity_caps = plan_store.active_modifiers(_S["conn"], s["id"])
     readiness = plan_store.active_readiness(_S["conn"], s["id"])
+    holds = plan_store.active_block_holds(_S["conn"], s["id"])
     if edit["target"] == "unavailable":
         unavail = unavail + [edit]
     elif edit["target"] == "availability":
@@ -362,9 +402,11 @@ def _candidate_plan(edit):
         intensity_caps = intensity_caps + [edit]
     elif edit["target"] == "readiness":
         readiness = readiness + [edit]
+    elif edit["target"] == "block_hold":
+        holds = {**holds, edit["block"]: holds.get(edit["block"], 0) + edit["weeks"]}
     return plan_gen.generate_plan(_S["m"], _S["profile"], s, events, unavail, _S["as_of"],
                                   availability=availability, intensity_caps=intensity_caps,
-                                  readiness=readiness)
+                                  readiness=readiness, holds=holds)
 
 
 def _propose(text):
@@ -435,13 +477,31 @@ def advisories():
     return {"recurring_themes": _compute_advisories()}
 
 
+def _progression_text(p):
+    """Compact text rendering of the phase-progression assessment for the coach context (beats 3-4)."""
+    if not p or p.get("state") != "ok":
+        return None
+    g = p.get("gate", {})
+    lines = [f"{p['block']} -> {p.get('next_block')}: verdict {p['verdict']}. {p.get('headline', '')}"]
+    if g.get("value") is not None:
+        lines.append(f"Gate {g.get('name')}: {g['value']}% (target {g.get('target')}, "
+                     f"confidence {g.get('confidence')}).")
+    if p.get("this_week_test"):
+        lines.append(f"This week tests: {p['this_week_test']}.")
+    for br in p.get("branches", []):
+        lines.append(f"If {br['outcome']} -> {br['action']} (calendar cost: {br['calendar_cost']}).")
+    return " ".join(lines)
+
+
 def _weekly_briefing():
-    """Compose the deterministic weekly briefing and seed it into the coach's context so the
-    next reply narrates it (the coach never recomputes these numbers)."""
+    """Compose the deterministic weekly briefing + phase-progression and seed them into the coach's
+    context so the next reply narrates them (the coach never recomputes these numbers)."""
     themes = _compute_advisories()
     b = plan_review.weekly_briefing(_S["m"], _S.get("plan"), _S["status"], themes, _S["as_of"])
+    prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), _S["as_of"], _S.get("profile"))
     if _S.get("coach"):
         _S["coach"].weekly_briefing = plan_review.briefing_text(b)
+        _S["coach"].phase_progression = _progression_text(prog)
     return b
 
 

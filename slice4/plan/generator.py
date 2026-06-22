@@ -46,9 +46,14 @@ def pick_a_race(events, today):
     return min(pool, key=lambda e: e["event_date"]) if pool else None
 
 
-def fit_blocks(n_weeks, cfg):
+def fit_blocks(n_weeks, cfg, holds=None):
     """Scale the canonical matrix blocks to n_weeks, preserving the Friel sequence and the
-    matrix's base-heavy proportions. Returns a per-week list of (block, is_last_week_of_block)."""
+    matrix's base-heavy proportions. Returns a per-week list of (block, is_last_week_of_block).
+
+    `holds` (Slice 5): {block_name: extra_weeks} — a phase-progression HOLD. The race date is
+    fixed, so extra weeks are STOLEN from later base/build blocks (latest first, floor 1 wk each).
+    That is the honest cost — holding base eats build time, which the honest-miss then surfaces.
+    A hold is capped at what can be stolen without zeroing a downstream block."""
     race_w = cfg.race_weeks if n_weeks >= 3 else (1 if n_weeks >= 2 else 0)
     peak_w = cfg.peak_weeks if (n_weeks - race_w) >= 8 else (1 if (n_weeks - race_w) >= 4 else 0)
     R = max(0, n_weeks - race_w - peak_w)
@@ -59,6 +64,22 @@ def fit_blocks(n_weeks, cfg):
     alloc = [int(x) for x in raw]
     for i in sorted(range(len(bb)), key=lambda i: raw[i] - alloc[i], reverse=True)[: R - sum(alloc)]:
         alloc[i] += 1
+
+    if holds:
+        names = [b[0] for b in bb]
+        for hname, extra in holds.items():
+            extra = int(extra)
+            if hname not in names or extra <= 0:
+                continue
+            hi, stolen = names.index(hname), 0
+            for j in range(len(bb) - 1, hi, -1):          # steal from later base/build blocks
+                if stolen >= extra:
+                    break
+                take = min(extra - stolen, alloc[j] - 1)   # leave >= 1 week per downstream block
+                if take > 0:
+                    alloc[j] -= take
+                    stolen += take
+            alloc[hi] += stolen                            # only add what we could steal (R fixed)
 
     peak_block = next(b for b in cfg.canonical_blocks if b[1] == "peak")
     race_block = next(b for b in cfg.canonical_blocks if b[1] == "taper")
@@ -109,7 +130,7 @@ def diff_plans(old, new):
 
 
 def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CALENDAR,
-                  availability=None, intensity_caps=None, readiness=None):
+                  availability=None, intensity_caps=None, readiness=None, holds=None):
     """Return {"meta": {...}, "weeks": [...]} or {"error": ...}. The plan spans the whole
     season (start -> A-race); weeks already elapsed carry ACTUAL TSS/CTL for planned-vs-actual.
 
@@ -140,7 +161,7 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
         weeks.append(w)
         w += dt.timedelta(days=7)
     N = len(weeks)
-    seq = fit_blocks(N, cfg)
+    seq = fit_blocks(N, cfg, holds)
 
     # --- anchors (nothing re-derived): planned trajectory starts from CTL at season start ---
     anchor_ctl = float(m.ctl.asof(pd.Timestamp(plan_start.isoformat())))

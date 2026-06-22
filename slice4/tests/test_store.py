@@ -87,6 +87,15 @@ def test_adjustment_audit_and_undo_round_trip():
     assert ps.undo_adjustment(c, aid) is None
 
 
+def test_block_hold_round_trip_and_isolation():
+    c, sid = _conn()
+    ps.add_modifier(c, sid, "block_hold", "2026-06-01", "2026-06-01", "t", hours=1, reason="Base 2")
+    ps.add_modifier(c, sid, "block_hold", "2026-06-01", "2026-06-01", "t", hours=1, reason="Base 2")
+    assert ps.active_block_holds(c, sid) == {"Base 2": 2}        # accumulate per block
+    av, ic = ps.active_modifiers(c, sid)                          # must NOT leak into other lists
+    assert av == [] and ic == [] and ps.active_readiness(c, sid) == []
+
+
 def test_undo_time_loss_deletes_unavailable():
     c, sid = _conn()
     uid = ps.add_unavailable(c, sid, "2026-07-01", "2026-07-07", "2026-06-13T00:00:00", reason="flu")

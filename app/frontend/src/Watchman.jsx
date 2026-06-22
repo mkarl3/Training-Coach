@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Wattson, { VB_HEAD } from "./Wattson";
+import PhaseProgress from "./PhaseProgress";
 
 // Watt Smith fitness-trend dashboard. ONE instrument: a single ramp-coloured CTL line with
 // weekly-TSS bars, insights pinned as markers on the timeline, and Coach Wattson reading the
@@ -251,7 +252,7 @@ function HeroBar({ hero, onSeeWeek, onCheckIn }) {
   );
 }
 
-export default function Watchman({ meta, onSeeWeek, onCheckIn }) {
+export default function Watchman({ meta, onSeeWeek, onCheckIn, onPlanChange }) {
   const [data, setData] = useState(null);
   const [win, setWin] = useState(52);          // default 1yr
   const [sel, setSel] = useState("now");
@@ -282,6 +283,7 @@ export default function Watchman({ meta, onSeeWeek, onCheckIn }) {
   return (
     <>
     <HeroBar hero={data.hero} onSeeWeek={onSeeWeek} onCheckIn={onCheckIn} />
+    <PhaseProgress meta={meta} onCheckIn={onCheckIn} onPlanChange={onPlanChange} />
     <div className="panel trend-panel">
       <div className="trend-head">
         <h2>Fitness trend</h2>

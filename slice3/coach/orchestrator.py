@@ -77,7 +77,8 @@ class Coach:
     """Wires retrieval + findings + notes + memory into per-turn LLM calls."""
 
     def __init__(self, conn, watch_state, ranked_confirmed, index, client=None, cfg=DEFAULT,
-                 profile=None, plan_summary=None, soft_advisories=None, weekly_briefing=None):
+                 profile=None, plan_summary=None, soft_advisories=None, weekly_briefing=None,
+                 phase_progression=None):
         import anthropic
         from wko_metrics import DEFAULT_PROFILE
         self.conn = conn                      # coach.db (notes + conversations)
@@ -97,6 +98,7 @@ class Coach:
         # This week's deterministic briefing (slice4.5 weekly check-in) — set when a check-in is
         # opened; the coach narrates it, never recomputes it.
         self.weekly_briefing = weekly_briefing
+        self.phase_progression = phase_progression
 
     # ---- context assembly (the structural guarantee lives here) ----
     def _retrieve(self, question):
@@ -139,8 +141,13 @@ class Coach:
                   f"{self.soft_advisories}\n\n" if self.soft_advisories else "")
         briefing = (f"THIS WEEK'S BRIEFING (deterministic — narrate it, do NOT recompute these "
                     f"numbers):\n{self.weekly_briefing}\n\n" if self.weekly_briefing else "")
+        progression = (f"PHASE PROGRESSION (deterministic gate — advise on whether this block has "
+                       f"done its job. Narrate the contingency (what this week tests) and the "
+                       f"calendar cost of holding. You may PROPOSE a hold, but the athlete confirms "
+                       f"— do NOT recompute numbers yourself):\n{self.phase_progression}\n\n"
+                       if self.phase_progression else "")
         return (f"ATHLETE PROFILE (fixed facts):\n{self._profile_context(as_of)}\n\n"
-                f"{briefing}{calendar}{themes}"
+                f"{briefing}{progression}{calendar}{themes}"
                 f"FINDINGS (deterministic, as of {as_of}):\n"
                 f"{_findings_context(self.watch_state, self.ranked_confirmed)}\n\n"
                 f"METHODOLOGY (retrieved for this question, corpus v{self.index.version}):\n{meth}\n\n"

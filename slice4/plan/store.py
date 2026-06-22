@@ -126,8 +126,8 @@ def delete_unavailable(conn, period_id):
 #   'readiness' stores its 0..1 ease FACTOR in the `hours` column (tighten-only; <=1 always).
 def add_modifier(conn, season_id, kind, start_date, end_date, created_at,
                  hours=None, reason=None, athlete_id=1):
-    if kind not in ("availability", "intensity_cap", "readiness"):
-        raise ValueError("kind must be 'availability', 'intensity_cap', or 'readiness'")
+    if kind not in ("availability", "intensity_cap", "readiness", "block_hold"):
+        raise ValueError("kind must be availability/intensity_cap/readiness/block_hold")
     cur = conn.execute(
         "INSERT INTO plan_modifier (season_id, athlete_id, kind, start_date, end_date, hours, "
         "reason, active, created_at) VALUES (?,?,?,?,?,?,?,1,?)",
@@ -161,6 +161,18 @@ def active_readiness(conn, season_id):
         "SELECT start_date, end_date, hours, reason FROM plan_modifier "
         "WHERE season_id=? AND active=1 AND kind='readiness' ORDER BY start_date", (season_id,))
     return [{"start_date": s, "end_date": e, "factor": h, "reason": r} for s, e, h, r in rows]
+
+
+def active_block_holds(conn, season_id):
+    """ACTIVE phase-progression holds for the generator: {block_name: total_extra_weeks}.
+    Stored as kind='block_hold' (block in `reason`, weeks in `hours`)."""
+    rows = conn.execute(
+        "SELECT reason, hours FROM plan_modifier "
+        "WHERE season_id=? AND active=1 AND kind='block_hold'", (season_id,))
+    out = {}
+    for block, weeks in rows:
+        out[block] = out.get(block, 0) + int(weeks or 0)
+    return out
 
 
 # --- adjustment audit trail + undo (Slice 4.5) ---

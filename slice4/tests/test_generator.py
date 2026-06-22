@@ -24,6 +24,20 @@ def test_deterministic(m, as_of):
     assert p1 == p2                                   # same inputs -> same plan, exactly
 
 
+def test_block_hold_extends_block_steals_from_later_total_fixed(m, as_of):
+    from collections import Counter
+    season, events = season_at(as_of, weeks_out=16)
+    base = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)
+    held = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of,
+                                   holds={"Base 2": 1})
+    cb, ch = Counter(w["block"] for w in base["weeks"]), Counter(w["block"] for w in held["weeks"])
+    assert ch["Base 2"] == cb["Base 2"] + 1                         # held block grew by 1
+    assert sum(ch.values()) == sum(cb.values())                    # race fixed -> total unchanged
+    assert sum(ch.values()) == base["meta"]["weeks"]
+    later = sum(ch[b] for b in ("Build 1", "Build 2")) < sum(cb[b] for b in ("Build 1", "Build 2"))
+    assert later                                                   # the week came from a later block
+
+
 def test_phases_run_backward_and_end_at_race_week(m, as_of):
     season, events = season_at(as_of, weeks_out=16)
     plan = generator.generate_plan(m, DEFAULT_PROFILE, season, events, [], as_of)

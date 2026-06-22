@@ -354,6 +354,56 @@ class Metrics:
         return demonstrated_safe_acute_ratio(self.weekly_tss(), self.profile.acwr_min_chronic_load,
                                              percentile)
 
+    # --- Slice 5 phase-progression helpers ---
+    def fractional_utilization(self, as_of=None, window_days=42):
+        """mFTP as a % of power-at-VO2max (proxied by best recent 5-min power) — the sourced
+        Base->Build gate. None when there's no recent 5-min effort to anchor it."""
+        ao = pd.Timestamp(as_of) if as_of else self.daily.index.max()
+        w = self.workouts.copy()
+        w["_d"] = pd.to_datetime(w["date"])
+        seg = w[(w["_d"] <= ao) & (w["_d"] > ao - pd.Timedelta(days=window_days))]
+        p5 = pd.to_numeric(seg["p5min_w"], errors="coerce").dropna()
+        if p5.empty:
+            return None
+        vo2 = float(p5.max())
+        ftp = float(self.mftp.asof(ao))
+        if not np.isfinite(ftp) or vo2 <= 0:
+            return None
+        return {"pct": round(100.0 * ftp / vo2, 1), "mftp": round(ftp), "vo2_power": round(vo2),
+                "vo2_date": seg.loc[p5.idxmax(), "_d"].strftime("%Y-%m-%d")}
+
+    # which per-ride power column anchors each duration band (for staleness)
+    _BAND_COL = {"short": "p5s_w", "medium": "p1min_w", "vo2": "p5min_w", "long": "p20min_w"}
+
+    def band_staleness(self, as_of=None, fresh_frac=0.93, window_days=90):
+        """Days since the last GENUINE max effort in each duration band (a ride whose band power is
+        within fresh_frac of the trailing-window best). None = no effort in that band. The modeled
+        metrics (Pmax/FRC/VO2/mFTP) are only trustworthy when their band is fresh."""
+        ao = pd.Timestamp(as_of) if as_of else self.daily.index.max()
+        w = self.workouts.copy()
+        w["_d"] = pd.to_datetime(w["date"])
+        w = w[w["_d"] <= ao]
+        out = {}
+        for band, col in self._BAND_COL.items():
+            ww = w.assign(_v=pd.to_numeric(w[col], errors="coerce")).dropna(subset=["_v"])
+            recent = ww[ww["_d"] > ao - pd.Timedelta(days=window_days)]
+            if recent.empty:
+                out[band] = None
+                continue
+            peak = float(recent["_v"].max())
+            fresh = recent[recent["_v"] >= fresh_frac * peak]
+            out[band] = int((ao - fresh["_d"].max()).days)
+        return out
+
+    def ctl_change(self, as_of=None, days=28):
+        """CTL delta over the trailing `days` (absorption / building check)."""
+        ao = pd.Timestamp(as_of) if as_of else self.daily.index.max()
+        c = self.ctl.dropna()
+        a, b = c.asof(ao - pd.Timedelta(days=days)), c.asof(ao)
+        if not (np.isfinite(a) and np.isfinite(b)):
+            return None
+        return round(float(b - a), 1)
+
     def readiness_from_form(self, as_of=None, floor=0.7, low_pct=0.30):
         """Objective readiness BACKSTOP from current form (TSB), athlete-relative. ~1.0 normally;
         eases only when TSB sits low in the athlete's OWN range — genuine fatigue they might not
