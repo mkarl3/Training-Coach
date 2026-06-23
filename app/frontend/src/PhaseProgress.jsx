@@ -73,6 +73,25 @@ export default function PhaseProgress({ meta, onCheckIn, onPlanChange }) {
 
       <div className="phase-read"><span className="phase-coach">COACH WATTSON</span> {p.headline}</div>
 
+      {p.started && p.focus && (
+        <div className="phase-brief">
+          <div className="pb-line"><span className="pb-k">FOCUS</span>
+            <span className="pb-v">{p.focus}{p.field_test_week ? " · field test this week" : ""}</span></div>
+          {p.watching && <div className="pb-line"><span className="pb-k">I'M WATCHING</span>
+            <span className="pb-v">{p.watching}</span></div>}
+          {p.advance_when && <div className="pb-line"><span className="pb-k">WE MOVE ON WHEN</span>
+            <span className="pb-v">{p.advance_when}</span></div>}
+          {p.branches?.length > 0 && (
+            <div className="pb-contingency">
+              {p.branches.map((b, i) => (
+                <div key={i} className="pb-branch"><span className="pb-if">IF</span> {b.outcome} → {b.action}
+                  {b.calendar_cost && b.calendar_cost !== "none" && <span className="muted"> ({b.calendar_cost})</span>}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="phase-metrics">
         {hasFu ? (
           <div className="pmetric wide">

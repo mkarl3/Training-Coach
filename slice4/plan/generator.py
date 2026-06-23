@@ -130,7 +130,8 @@ def diff_plans(old, new):
 
 
 def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CALENDAR,
-                  availability=None, intensity_caps=None, readiness=None, holds=None):
+                  availability=None, intensity_caps=None, readiness=None, holds=None,
+                  cal_today=None):
     """Return {"meta": {...}, "weeks": [...]} or {"error": ...}. The plan spans the whole
     season (start -> A-race); weeks already elapsed carry ACTUAL TSS/CTL for planned-vs-actual.
 
@@ -144,7 +145,11 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
     availability = availability or []
     intensity_caps = intensity_caps or []
     readiness = readiness or []                       # subjective (check-in) readiness ease windows
-    today = dt.date.fromisoformat(as_of)
+    today = dt.date.fromisoformat(as_of)              # DATA date — how far rides/metrics exist
+    # CALENDAR date — what week we're actually in. Defaults to the data date for historical/test
+    # runs; the app passes the real today so a plan that starts the day after the last ride still
+    # reads as "week 1, in progress" instead of "not started yet".
+    cal = dt.date.fromisoformat(cal_today) if cal_today else today
     wstart = profile.week_starts_on
     a_race = pick_a_race(events, today)
     if a_race is None:
@@ -337,11 +342,14 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
         if monotony_prone and not is_recovery and family != "taper":
             fired.append(mono_note)
 
-        # --- planned vs actual: elapsed weeks carry actuals from the facade ---
+        # --- planned vs actual ---
+        # status is a CALENDAR question (has this week begun in real time?); actuals are a DATA
+        # question (we can only sum rides we actually have, through the data date `today`).
         status = "upcoming"
         actual_tss = actual_ctl = None
-        if mon <= today:
-            status = "elapsed" if we <= today else "current"
+        if mon <= cal:
+            status = "elapsed" if we <= cal else "current"
+        if mon <= today:                                  # data exists for at least part of this week
             seg = daily.loc[mon.isoformat():min(we, today).isoformat(), "tss_sum"].dropna()
             actual_tss = round(float(seg.sum())) if len(seg) else 0
             ac = m.ctl.asof(pd.Timestamp(min(we, today).isoformat()))

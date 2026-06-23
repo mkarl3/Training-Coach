@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Wattson, { VB_HEAD } from "./Wattson";
-import PhaseProgress from "./PhaseProgress";
+import MergedCard from "./MergedCard.jsx";
 
 // Watt Smith fitness-trend dashboard. ONE instrument: a single ramp-coloured CTL line with
 // weekly-TSS bars, insights pinned as markers on the timeline, and Coach Wattson reading the
@@ -215,44 +215,7 @@ function ReadStrip({ m, onSeeWeek }) {
   );
 }
 
-function HeroBar({ hero, onSeeWeek, onCheckIn }) {
-  if (!hero) return null;
-  const accent = { good: "var(--green)", alarm: "var(--red)", watch: "var(--gold)" }[hero.accent] || "var(--gold)";
-  const f = hero.vitals.fitness, fm = hero.vitals.form;
-  const fcol = { rising: STATE.build, sliding: STATE.lose, holding: STATE.hold }[f.dir] || "var(--cream)";
-  const farrow = { rising: "↑", sliding: "↓", holding: "→" }[f.dir] || "";
-  const fmcol = { fresh: "var(--tsb)", "run down": "var(--red)" }[fm.label] || "var(--cream)";
-  const d = hero.directive;
-  return (
-    <div className="hero-bar" style={{ borderLeftColor: accent }}>
-      <div className="hero-avatar"><Wattson mood={MOOD[hero.mood] || "calm"} viewBox={VB_HEAD} /></div>
-      <div className="hero-msg">
-        <div className="hero-coach">COACH WATTSON</div>
-        <div className="hero-headline">{hero.headline}</div>
-        <div className="hero-directive">{d.pre}{d.tss != null && <b>{d.tss} TSS</b>}{d.post}</div>
-      </div>
-      <div className="hero-right">
-        <div className="hero-vital">
-          <div className="hv-lab">Fitness</div>
-          <div className="hv-val" style={{ color: fcol }}>{f.value}</div>
-          <div className="hv-sub" style={{ color: fcol }}>{farrow} {f.dir}</div>
-        </div>
-        <div className="hero-vdiv" />
-        <div className="hero-vital">
-          <div className="hv-lab">Form</div>
-          <div className="hv-val" style={{ color: fmcol }}>{fm.value >= 0 ? "+" : ""}{fm.value}</div>
-          <div className="hv-sub">{fm.label}</div>
-        </div>
-        <div className="hero-cta">
-          <button className="hero-btn primary" onClick={onSeeWeek}><i className="ti ti-calendar" aria-hidden="true" /> See this week →</button>
-          <button className="hero-btn ghost" onClick={onCheckIn}><i className="ti ti-message-2" aria-hidden="true" /> Check in</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-export default function Watchman({ meta, onSeeWeek, onCheckIn, onPlanChange }) {
+export default function Watchman({ meta, onSeeWeek, onCheckIn, onPlanChange, onReply }) {
   const [data, setData] = useState(null);
   const [win, setWin] = useState(52);          // default 1yr
   const [sel, setSel] = useState("now");
@@ -282,8 +245,7 @@ export default function Watchman({ meta, onSeeWeek, onCheckIn, onPlanChange }) {
 
   return (
     <>
-    <HeroBar hero={data.hero} onSeeWeek={onSeeWeek} onCheckIn={onCheckIn} />
-    <PhaseProgress meta={meta} onCheckIn={onCheckIn} onPlanChange={onPlanChange} />
+    <MergedCard meta={meta} onSeeWeek={onSeeWeek} onReply={onReply} />
     <div className="panel trend-panel">
       <div className="trend-head">
         <h2>Fitness trend</h2>

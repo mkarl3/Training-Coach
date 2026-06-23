@@ -84,6 +84,11 @@ def assess_progression(m, plan, as_of, profile=None):
     floor = max(nominal, BASE_MIN_WEEKS if fam == "base" else BUILD_MIN_WEEKS if fam == "build" else 1)
     elapsed = sum(1 for w in cur["weeks"] if w["status"] in ("elapsed", "current"))
     min_met = elapsed >= min(nominal, floor)
+    # block-onboarding context (straight from the plan — focus / what the block is building /
+    # the trigger to move on): lets Wattson say "week N of Prep, here's the focus, here's what
+    # I'm watching" instead of a bare verdict.
+    cur_week = next((w for w in cur["weeks"] if w["status"] == "current"), cur["weeks"][0])
+    week_in_block = max(1, elapsed)                  # "week 1 of N" once a block is live
     compliance = _compliance([w for b in blocks[:i + 1] for w in b["weeks"]])
     chg = m.ctl_change(as_of)                       # building?
     stale = m.band_staleness(as_of)
@@ -100,10 +105,13 @@ def assess_progression(m, plan, as_of, profile=None):
         "state": "ok", "as_of": as_of, "block": block, "next_block": next_block,
         "transition_kind": kind, "family": fam,
         "weeks_in_block": nominal, "min_weeks": min(nominal, floor),
-        "weeks_elapsed": elapsed, "min_weeks_met": min_met,
+        "weeks_elapsed": elapsed, "week_in_block": week_in_block, "min_weeks_met": min_met,
+        "started": not future, "focus": cur_week.get("focus"),
+        "watching": cur_week.get("target_metric"), "advance_when": cur_week.get("advance_when"),
+        "field_test_week": bool(cur_week.get("field_test")),
         "compliance": compliance, "ctl_change_28d": chg,
         "gate": gate, "verdict": verdict, "this_week_test": test, "branches": branches,
-        "headline": _headline(verdict, block, next_block, gate),
+        "headline": _headline(verdict, block, next_block, gate, week_in_block, nominal, future),
     }
 
 
@@ -165,16 +173,18 @@ def _gate(m, as_of, kind, block, next_block, stale, chg, compliance):
     return g, "ON_TRACK", "absorb the load; we step up on schedule", []
 
 
-def _headline(verdict, block, next_block, gate):
+def _headline(verdict, block, next_block, gate, week_in_block=1, weeks_in_block=1, future=False):
     nb = next_block or "the next block"
+    wk = f"Week {week_in_block} of {weeks_in_block} in {block}"
+    kick = wk + (" — let's get it rolling." if week_in_block <= 1 else " — keep stacking the work.")
     return {
         "ADVANCE": f"{block} has done its job — ready to move to {nb}.",
         "HOLD": f"Hold in {block} — the gate ({gate.get('name')}) isn't met yet.",
         "PROCEED_WITH_DEBT": f"Not fully ready, but the race clock says move to {nb}.",
         "NEEDS_BENCHMARK": f"Can't judge {block} yet — {gate.get('name')} needs a fresh effort.",
-        "BACK_OFF": f"Signs of over-reaching — back off before advancing.",
-        "ON_TRACK": f"{block} is on track.",
-        "NOT_STARTED": f"{block} hasn't started yet — here's what it needs to clear.",
+        "BACK_OFF": "Signs of over-reaching — back off before advancing.",
+        "ON_TRACK": kick if not future else f"{block} is next up — here's what it's about.",
+        "NOT_STARTED": f"{block} is next up — here's what it's about.",
         "CALENDAR": "Taper is timed to your race, not a metric.",
-        "IN_PROGRESS": f"{block} is in progress.",
+        "IN_PROGRESS": kick,
     }.get(verdict, f"{block}: {verdict}")

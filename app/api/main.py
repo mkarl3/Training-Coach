@@ -31,6 +31,7 @@ from coach.orchestrator import Coach                   # noqa: E402
 from coach.retrieval import MethodologyIndex           # noqa: E402
 from plan import store as plan_store, generator as plan_gen, diary as plan_diary, review as plan_review  # noqa: E402
 from plan import progression as plan_progression  # noqa: E402
+from watchman import trend as wm_trend                 # noqa: E402  (projection helper for hold preview)
 
 WKO_DB = os.environ.get("WKO_DB", os.path.join(ROOT, "slice0", "wko.db"))
 EXPORTS_DIR = os.path.join(ROOT, "WKO5 Exports")
@@ -55,7 +56,8 @@ def _build_plan(conn, m, prof, as_of):
     holds = plan_store.active_block_holds(conn, season["id"])
     plan = plan_gen.generate_plan(m, prof, season, events, unavail, as_of,
                                   availability=availability, intensity_caps=intensity_caps,
-                                  readiness=readiness, holds=holds)
+                                  readiness=readiness, holds=holds,
+                                  cal_today=datetime.date.today().isoformat())
     return season, plan
 
 
@@ -282,6 +284,25 @@ def progression_hold(body: HoldIn):
     return {"applied": summary, "adjustment_id": aid, "diff": diff, "plan": _S["plan"]}
 
 
+@app.get("/api/progression/hold/preview")
+def progression_hold_preview(block: str = Query(...), weeks: int = Query(1)):
+    """Dry-run a phase-progression HOLD: return the diff + the eased forward projection WITHOUT
+    applying anything. Lets the check-in show 'if eased' before the athlete commits to EASE IT."""
+    _require_loaded()
+    if not _S.get("season") or not _S.get("plan"):
+        raise HTTPException(400, "no active plan")
+    if block not in {w["block"] for w in _S["plan"]["weeks"]}:
+        raise HTTPException(400, f"unknown block {block!r}")
+    weeks = max(1, min(2, weeks))
+    cand = _candidate_plan({"target": "block_hold", "block": block, "weeks": weeks})
+    return {
+        "block": block, "weeks": weeks,
+        "diff": plan_gen.diff_plans(_S["plan"], cand),
+        "projection_current": wm_trend._projection(_S["plan"]),
+        "projection_eased": wm_trend._projection(cand),
+    }
+
+
 # ---------------- coach ----------------
 class MessageIn(BaseModel):
     text: str
@@ -406,7 +427,8 @@ def _candidate_plan(edit):
         holds = {**holds, edit["block"]: holds.get(edit["block"], 0) + edit["weeks"]}
     return plan_gen.generate_plan(_S["m"], _S["profile"], s, events, unavail, _S["as_of"],
                                   availability=availability, intensity_caps=intensity_caps,
-                                  readiness=readiness, holds=holds)
+                                  readiness=readiness, holds=holds,
+                                  cal_today=datetime.date.today().isoformat())
 
 
 def _propose(text):
@@ -477,12 +499,28 @@ def advisories():
     return {"recurring_themes": _compute_advisories()}
 
 
+@app.get("/api/coach/dashboard")
+def coach_dashboard(as_of: str = Query(None)):
+    """The merged dashboard card: Wattson's deterministic read (hero + phase gate folded into one
+    voice) + vitals + the gate-aware progress visual. Composed server-side so the UI never
+    synthesizes coaching copy."""
+    _require_loaded()
+    ao = as_of or _S["as_of"]
+    hero = wm_trend._hero(_S["m"], ao, _S.get("plan"), _S.get("status"))
+    prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
+    return plan_review.coach_card(hero, prog)
+
+
 def _progression_text(p):
     """Compact text rendering of the phase-progression assessment for the coach context (beats 3-4)."""
     if not p or p.get("state") != "ok":
         return None
     g = p.get("gate", {})
     lines = [f"{p['block']} -> {p.get('next_block')}: verdict {p['verdict']}. {p.get('headline', '')}"]
+    if p.get("started") and p.get("focus"):
+        lines.append(f"Block context — week {p.get('week_in_block')} of {p.get('weeks_in_block')}, "
+                     f"focus: {p['focus']}; what it's building: {p.get('watching')}; "
+                     f"advance when: {p.get('advance_when')}.")
     if g.get("value") is not None:
         lines.append(f"Gate {g.get('name')}: {g['value']}% (target {g.get('target')}, "
                      f"confidence {g.get('confidence')}).")
@@ -493,11 +531,31 @@ def _progression_text(p):
     return " ".join(lines)
 
 
+def _checkin_streak():
+    """Consecutive weeks (ending at the latest) with at least one logged check-in."""
+    try:
+        rows = [r[0] for r in _S["conn"].execute("SELECT DISTINCT date FROM checkin")]
+    except Exception:
+        return 0
+    if not rows:
+        return 0
+    mondays = sorted({(datetime.date.fromisoformat(d) - datetime.timedelta(days=datetime.date.fromisoformat(d).weekday()))
+                      for d in rows}, reverse=True)
+    streak = 1
+    for i in range(1, len(mondays)):
+        if (mondays[i - 1] - mondays[i]).days == 7:
+            streak += 1
+        else:
+            break
+    return streak
+
+
 def _weekly_briefing():
     """Compose the deterministic weekly briefing + phase-progression and seed them into the coach's
     context so the next reply narrates them (the coach never recomputes these numbers)."""
     themes = _compute_advisories()
     b = plan_review.weekly_briefing(_S["m"], _S.get("plan"), _S["status"], themes, _S["as_of"])
+    b["streak"] = _checkin_streak()
     prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), _S["as_of"], _S.get("profile"))
     if _S.get("coach"):
         _S["coach"].weekly_briefing = plan_review.briefing_text(b)

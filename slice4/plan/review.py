@@ -112,3 +112,118 @@ def briefing_text(b):
         lines.append("Recurring in check-ins: "
                      + ", ".join(f"{t['label']} ×{t['checkins']}" for t in b["themes"]) + ".")
     return "\n".join(lines)
+
+
+# --- merged dashboard card (hero + phase fused into one Wattson read) ---
+_VERDICT_LABEL = {
+    "ADVANCE": "READY TO ADVANCE", "HOLD": "HOLD", "NEEDS_BENCHMARK": "NEEDS A BENCHMARK",
+    "PROCEED_WITH_DEBT": "PROCEED · RACE CLOCK", "BACK_OFF": "BACK OFF",
+    "NOT_STARTED": "NEXT UP", "ON_TRACK": "ON TRACK", "IN_PROGRESS": "IN PROGRESS",
+    "CALENDAR": "TIMED TO RACE",
+}
+
+
+def _gate_visual(prog):
+    """The gate-aware progress visual spec for the metric row. Self-contained: the frontend draws
+    a week-track (time/consistency gate), a banded gauge (scalar metric gate), a benchmark prompt
+    (stale metric), or a race note (calendar) — whichever the current block actually gates on."""
+    kind = prog.get("transition_kind")
+    gate = prog.get("gate") or {}
+    val = gate.get("value")
+    if kind == "calendar":
+        return {"kind": "calendar", "next_block": prog.get("next_block")}
+    if prog.get("verdict") == "NEEDS_BENCHMARK":
+        return {"kind": "benchmark", "need": prog.get("this_week_test"),
+                "next_block": prog.get("next_block")}
+    if isinstance(val, (int, float)):
+        return {"kind": "gauge", "value": val, "lo": 81, "hi": 85, "axis_min": 70, "axis_max": 100,
+                "metric": gate.get("metric", "gate"), "confidence": gate.get("confidence"),
+                "next_block": prog.get("next_block")}
+    return {"kind": "weeks", "elapsed": prog.get("week_in_block") or 0,
+            "total": prog.get("weeks_in_block") or 1, "next_block": prog.get("next_block"),
+            "ramp": prog.get("ctl_change_28d"), "ramp_ok": (prog.get("ctl_change_28d") or 0) >= 0}
+
+
+def coach_card(hero, prog):
+    """Compose the merged dashboard card: Wattson's deterministic narrative (the hero read + this
+    week's directive + the phase gate, folded into one voice), the glanceable vitals, and a
+    gate-aware progress-visual spec. Pure — it arranges grounded numbers/strings, invents nothing
+    (THE ONE RULE), so the UI never has to synthesize coaching copy."""
+    if not hero:
+        return {"narrative": ["Load some training data and I'll read where you stand."],
+                "vitals": None, "gate_visual": {"kind": "none"}, "mood": "calm",
+                "status": "awaiting", "verdict": None}
+    d = hero.get("directive") or {}
+    n = [hero["headline"]]
+    ok = bool(prog and prog.get("state") == "ok")
+
+    if ok:
+        block = prog["block"]
+        nb = prog.get("next_block") or "the next block"
+        focus = prog.get("focus")
+        watching = prog.get("watching")
+        w, wk = prog.get("week_in_block"), prog.get("weeks_in_block")
+        kind = prog.get("transition_kind")
+        gate = prog.get("gate") or {}
+        verdict = prog["verdict"]
+        val = gate.get("value")
+
+        if prog.get("started"):
+            n.append(f"This is week {w} of {wk} in {block}"
+                     + (f", and the focus is {focus}." if focus else "."))
+        else:
+            n.append(f"{block} is next up" + (f" — the focus is {focus}." if focus else "."))
+
+        if d.get("tss"):
+            n.append(f"{d['pre']}{d['tss']} TSS{d['post']}")
+        elif d.get("pre"):
+            n.append(d["pre"])
+
+        if kind == "calendar":
+            n.append("Peak and taper are timed back from your race, not a metric — we just need "
+                     "your form rising and the top-end sharp on the day.")
+        elif verdict == "NEEDS_BENCHMARK":
+            n.append(f"I can't read {gate.get('name', 'this')} cleanly yet — {prog.get('this_week_test')}.")
+        elif isinstance(val, (int, float)):
+            band = gate.get("target", "the ready band")
+            if verdict == "ADVANCE":
+                n.append(f"Your {gate.get('metric', 'gate')} is at {val}% — into the {band} zone. "
+                         f"Hold it flat a couple of weeks and we move to {nb}.")
+            else:
+                n.append(f"Your {gate.get('metric', 'gate')} is at {val}% — I want it in the {band} "
+                         f"zone before we add intensity. Keep doing the extensive work and it climbs.")
+        else:                                             # time / consistency gate (Prep, sub-steps)
+            lead = f"I'm watching your {watching} — keep it pointed up. " if watching else ""
+            n.append(f"{lead}String together {wk} steady, consistent weeks — hit at least 80% of "
+                     "what I put in front of you.")
+            if not prog.get("min_weeks_met"):
+                n.append(f"We don't jump to {nb} before week {prog.get('min_weeks')}; the base "
+                         "needs the weeks to stick.")
+
+        br = prog.get("branches") or []
+        if br and verdict != "NEEDS_BENCHMARK":
+            cost = br[0].get("calendar_cost", "no")
+            n.append(f"If {br[0]['outcome']}, {br[0]['action']}"
+                     + (f" — costs you {cost}." if cost and cost != "none" else " — at no cost."))
+        if gate.get("confidence") == "fresh":
+            n.append("Your numbers are fresh, so I can read all of this clean.")
+        gate_visual = _gate_visual(prog)
+        verdict_out = verdict
+    else:
+        n.append("No season plan loaded yet — set one up and I'll start gating your phases and "
+                 "calling the moves.")
+        gate_visual = {"kind": "none"}
+        verdict_out = None
+
+    return {
+        "mood": hero["mood"], "status": hero["status"],
+        "block": prog.get("block") if ok else None,
+        "next_block": prog.get("next_block") if ok else None,
+        "verdict": verdict_out, "verdict_label": _VERDICT_LABEL.get(verdict_out),
+        "week_in_block": prog.get("week_in_block") if ok else None,
+        "weeks_in_block": prog.get("weeks_in_block") if ok else None,
+        "narrative": n,
+        "vitals": hero["vitals"],
+        "this_week_tss": d.get("tss"),
+        "gate_visual": gate_visual,
+    }

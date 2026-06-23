@@ -85,7 +85,7 @@ function BriefingCard({ b }) {
   );
 }
 
-export default function Coach({ meta, onPlanChanged, onClose }) {
+export default function Coach({ meta, onPlanChanged, onClose, seedMessage }) {
   const [convId, setConvId] = useState(meta.latest_conversation_id);
   const [msgs, setMsgs] = useState([]);
   const [draft, setDraft] = useState("");
@@ -93,6 +93,7 @@ export default function Coach({ meta, onPlanChanged, onClose }) {
   const [cards, setCards] = useState({});   // proposalId -> {status, adjustmentId}
   const [themes, setThemes] = useState([]); // recurring soft-signal themes (non-binding)
   const chatRef = useRef(null);
+  const seedSent = useRef(false);
 
   useEffect(() => {
     fetch(`/api/coach/advisories`).then((r) => r.json())
@@ -137,12 +138,22 @@ export default function Coach({ meta, onPlanChanged, onClose }) {
   }
 
   useEffect(() => {
-    if (!meta.latest_conversation_id) return;
-    fetch(`/api/coach/history?conversation_id=${meta.latest_conversation_id}`)
-      .then((r) => r.json())
-      .then((h) => setMsgs(h.messages.map((m) => ({ role: m.role, content: m.content }))))
-      .catch(() => {});
-  }, [meta]);
+    let cancelled = false;
+    (async () => {
+      if (meta.latest_conversation_id) {
+        try {
+          const h = await fetch(`/api/coach/history?conversation_id=${meta.latest_conversation_id}`).then((r) => r.json());
+          if (!cancelled) setMsgs(h.messages.map((m) => ({ role: m.role, content: m.content })));
+        } catch { /* ignore */ }
+      }
+      // a reply typed on the dashboard card: send it once, after any history has loaded
+      if (seedMessage && !seedSent.current && !cancelled) {
+        seedSent.current = true;
+        sendText(seedMessage);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [meta, seedMessage]);
 
   useEffect(() => {
     // scroll ONLY the chat pane — scrollIntoView would scroll ancestor containers
@@ -151,10 +162,15 @@ export default function Coach({ meta, onPlanChanged, onClose }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs, busy]);
 
-  async function send() {
+  function send() {
     const text = draft.trim();
     if (!text || busy) return;
     setDraft("");
+    sendText(text);
+  }
+
+  async function sendText(text) {
+    if (!text || busy) return;
     setMsgs((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
     try {

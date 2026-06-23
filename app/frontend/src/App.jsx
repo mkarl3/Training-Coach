@@ -4,6 +4,7 @@ import Coach from "./Coach.jsx";
 import Profile from "./Profile.jsx";
 import Calendar from "./Calendar.jsx";
 import Onboarding from "./Onboarding.jsx";
+import CheckIn from "./CheckIn.jsx";
 import Wattson, { VB_HEAD, moodFromStatus } from "./Wattson.jsx";
 
 const RESTING_LINE = {
@@ -37,6 +38,8 @@ export default function App() {
   const [planKey, setPlanKey] = useState(0); // bump to remount the calendar after a plan change
   const [showProfile, setShowProfile] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
+  const [coachSeed, setCoachSeed] = useState(null);   // a reply typed on the dashboard, auto-sent on open
+  const [checkinOpen, setCheckinOpen] = useState(false);
   const [view, setView] = useState("dashboard");  // "dashboard" | "calendar"
   const fileRef = useRef(null);
 
@@ -56,6 +59,14 @@ export default function App() {
       fetch(`/api/meta`).then((r) => r.json()),
     ]);
     setIntake(st); setMeta(mt);
+  }
+
+  async function closeCheckin() {
+    // the check-in can load data and/or apply a hold — refresh meta and remount dashboard + calendar
+    setCheckinOpen(false);
+    try { setMeta(await fetch(`/api/meta`).then((r) => r.json())); } catch {}
+    setDataKey((k) => k + 1);
+    setPlanKey((k) => k + 1);
   }
 
   async function refreshAfterProfile() {
@@ -123,6 +134,7 @@ export default function App() {
         <div className="appbar-actions">
           {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
           <input type="file" accept=".xlsx" multiple ref={fileRef} onChange={onFile} style={{ display: "none" }} />
+          <button className="update-btn" onClick={() => setCheckinOpen(true)}>✓ Check-In</button>
           <button className="update-btn" onClick={() => setShowProfile(true)}>⚙ Profile</button>
           <button className="update-btn" disabled={upload.state === "busy"} onClick={() => fileRef.current?.click()}>
             {upload.state === "busy" ? "Updating…" : "↑ Load data"}
@@ -135,7 +147,7 @@ export default function App() {
 
       <div className="main">
         {view === "dashboard"
-          ? <Watchman key={"w" + dataKey} meta={meta} onSeeWeek={() => setView("calendar")} onCheckIn={() => setCoachOpen(true)} onPlanChange={() => setPlanKey((k) => k + 1)} />
+          ? <Watchman key={"w" + dataKey} meta={meta} onSeeWeek={() => setView("calendar")} onCheckIn={() => setCheckinOpen(true)} onPlanChange={() => setPlanKey((k) => k + 1)} onReply={(t) => { setCoachSeed(t); setCoachOpen(true); }} />
           : <Calendar key={"cal" + dataKey + "-" + planKey} />}
       </div>
 
@@ -143,13 +155,18 @@ export default function App() {
 
       {coachOpen && (
         <>
-          <div className="coach-scrim" onClick={() => setCoachOpen(false)} />
+          <div className="coach-scrim" onClick={() => { setCoachOpen(false); setCoachSeed(null); }} />
           <div className="coach-drawer">
-            <Coach key={"c" + dataKey} meta={meta}
+            <Coach key={"c" + dataKey} meta={meta} seedMessage={coachSeed}
               onPlanChanged={() => setPlanKey((k) => k + 1)}
-              onClose={() => setCoachOpen(false)} />
+              onClose={() => { setCoachOpen(false); setCoachSeed(null); }} />
           </div>
         </>
+      )}
+
+      {checkinOpen && (
+        <CheckIn meta={meta} onClose={closeCheckin}
+          onPlanChanged={() => { setPlanKey((k) => k + 1); setDataKey((k) => k + 1); }} />
       )}
     </div>
   );
