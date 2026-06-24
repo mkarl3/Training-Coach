@@ -1,20 +1,23 @@
-"""Metrics engine — turns Strava-derived ride summaries into the daily series the app consumes
-(TSS / CTL / ATL / TSB + the power-duration estimates), with NO WKO5 input. Fully self-consistent:
-a rolling, smoothed Critical Power IS the FTP used for TSS, so the whole pipeline stands on raw
-power alone. Validated against WKO5 (see validate.py): CTL r≈0.97, CP↔mFTP r≈0.95.
+"""Metrics engine — turns Strava-derived ride summaries into the daily + per-workout rows the app
+consumes (TSS / CTL / ATL / TSB + the power-duration estimates), with NO WKO5 input. Fully
+self-consistent: a rolling 90-day Critical Power IS the FTP used for TSS, so the whole pipeline
+stands on raw power alone. Validated vs WKO5 (validate.py): mFTP r≈0.95, CTL r≈0.97 once warm.
 
 Stage 1 scope = the validated core (load + PD + CP/W′/Pmax). Stream/HR/wellness-dependent fields
-(EF, Pw:HR decoupling, power-zone TiZ, HRV/sleep/RHR/weight) are deferred → emitted as None for now
-(noted per field); they get filled when the pull retains streams + a wellness source is added.
+(EF, Pw:HR decoupling, power-zone TiZ, TTE model, HRV/sleep/RHR/weight) are deferred → emitted as
+None for now; they fill in once the pull retains streams + a wellness source is added.
+
+Two findings baked in: (1) heavy smoothing of CP LAGS a declining trend and wrecks correlation —
+use the raw rolling-90d best (it's already slow-moving); (2) CTL (42d) + the 90d CP window need
+RUNWAY, so a real pull seeds from FULL history (the first ~6 weeks of any window are cold-start).
 """
 from __future__ import annotations
 
 import datetime as dt
 
 CTL_TC, ATL_TC = 42.0, 7.0
-CP_WINDOW_DAYS = 90          # trailing window for rolling power bests feeding CP
-CP_SMOOTH_TC = 21.0          # EWMA on the daily CP series → stable enough for plateau detection
-W_SHORT, W_LONG = "180", "720"   # 3-min & 12-min bests for the 2-point CP/W′ model
+CP_WINDOW_DAYS = 90
+W_SHORT, W_LONG = "180", "720"          # 3-min & 12-min bests for the 2-point CP/W′ model
 
 
 def _drange(a: str, b: str):
@@ -49,67 +52,94 @@ def _rolling_best(by_date, win_key, days, asof):
 
 
 def _cp_wprime(p_short, p_long):
-    """2-point Critical Power model from the 3-min & 12-min bests. CP ≈ mFTP, W′ ≈ FRC."""
+    """2-point Critical Power from the 3-min & 12-min bests. CP ≈ mFTP, W′ ≈ FRC."""
     if not p_short or not p_long or p_long >= p_short:
         return None, None
     cp = (p_long * 720 - p_short * 180) / (720 - 180)
-    wprime = (p_short - cp) * 180                      # joules
-    return cp, wprime
+    return cp, (p_short - cp) * 180          # CP (W), W′ (J)
 
 
-def build_daily(summaries: list[dict]) -> list[dict]:
-    """Daily rows shaped for the app's `daily` table, computed purely from ride summaries."""
+def _series(summaries):
+    """Shared pass: per-date rolling CP/W′/Pmax (raw 90-day best, carried over ride-less days).
+    Returns (by_date, start, end, cp_at, wprime_at, pmax_at, ftp_fallback)."""
     by = rides_by_date(summaries)
     if not by:
-        return []
+        return {}, None, None, {}, {}, {}, 180.0
     start, end = min(by), max(by)
-
-    # 1) rolling-90d Critical Power = the FTP we'll use. The rolling best is already slow-moving;
-    #    heavy EWMA on top LAGS a declining trend and wrecks the correlation (raw 90d r≈0.95 vs
-    #    over-smoothed 0.45 on Mike's detrain). So use the raw rolling CP, carried over ride-less
-    #    days. (A light plateau-smoothing layer for the Slice-5 gates can sit downstream later.)
-    cp_smooth, wprime_at, pmax_at = {}, {}, {}
+    cp_at, wprime_at, pmax_at = {}, {}, {}
     last_cp = last_wp = None
     for d in _drange(start, end):
         cp, wp = _cp_wprime(_rolling_best(by, W_SHORT, CP_WINDOW_DAYS, d),
                             _rolling_best(by, W_LONG, CP_WINDOW_DAYS, d))
         if cp:
             last_cp, last_wp = cp, wp
-        cp_smooth[d] = last_cp
-        wprime_at[d] = last_wp
+        cp_at[d], wprime_at[d] = last_cp, last_wp
         pmax_at[d] = _rolling_best(by, "5", CP_WINDOW_DAYS, d)
+    ftp_fallback = next((v for v in cp_at.values() if v), 180.0)
+    return by, start, end, cp_at, wprime_at, pmax_at, ftp_fallback
 
-    # 2) daily TSS using that day's smoothed CP as FTP (self-consistent), then CTL/ATL/TSB
-    ftp_fallback = next((v for v in cp_smooth.values() if v), 180.0)
+
+def _ride_tss(ride, ftp):
+    if_ = ride["np"] / ftp
+    return (ride["duration_s"] / 3600) * if_ ** 2 * 100, if_
+
+
+def build_daily(summaries: list[dict]) -> list[dict]:
+    """Daily rows shaped for the app's `daily` table, computed purely from ride summaries."""
+    by, start, end, cp_at, wprime_at, pmax_at, fb = _series(summaries)
+    if not by:
+        return []
     ctl = atl = None
     rows = []
     for d in _drange(start, end):
-        ftp = cp_smooth.get(d) or ftp_fallback
+        ftp = cp_at.get(d) or fb
         rides = by.get(d, [])
         tss = work = dur = 0.0
         for r in rides:
-            if_ = r["np"] / ftp
-            tss += (r["duration_s"] / 3600) * if_ ** 2 * 100
+            t, _ = _ride_tss(r, ftp)
+            tss += t
             dur += r["duration_s"]
-            work += (r.get("avg") or r["np"]) * r["duration_s"] / 1000.0   # kJ ≈ avg W × s / 1000
+            work += (r.get("avg") or r["np"]) * r["duration_s"] / 1000.0
         ctl = _ewma(ctl, tss, CTL_TC)
         atl = _ewma(atl, tss, ATL_TC)
-        cp = cp_smooth.get(d)
+        cp = cp_at.get(d)
         rows.append({
             "date": d, "year": int(d[:4]), "is_projected": 0,
             "has_ride": 1 if rides else 0, "num_workouts": len(rides),
-            "tss_sum": round(tss, 1), "duration_sec": int(dur) or None,
+            "tss_sum": round(tss, 1), "duration_sec": int(dur) or 0,
             "work_kj": round(work) or None,
             "atl": round(atl, 1), "ctl": round(ctl, 1), "tsb": round(ctl - atl, 1),
-            "mftp_w": round(cp) if cp else None,                      # CP stands in for mFTP
-            "frc_kj": round(wprime_at[d] / 1000, 1) if wprime_at[d] else None,  # W′ → FRC
+            "mftp_w": round(cp) if cp else None,
+            "frc_kj": round(wprime_at[d] / 1000, 1) if wprime_at[d] else None,
             "pmax_w": round(pmax_at[d]) if pmax_at[d] else None,
-            "tte_sec": None,        # TODO: model TTE from CP/W′ (weak proxy; left null for now)
-            # stream/HR/wellness-dependent — deferred (Stage: rich metrics):
-            "if_daily": None, "ef": None, "decoupling_pct": None,
-            "weight_lb": None, "fat_pct": None, "sickness": None,
-            "hrv_7d_avg_ms": None, "hrv_daily_ms": None, "rhr_bpm": None,
+            "tte_sec": None, "if_daily": None,
         })
+    return rows
+
+
+def build_workouts(summaries: list[dict]) -> list[dict]:
+    """Per-ride rows shaped for the app's `workout` table (TSS/IF/NP + PD points), FTP-consistent
+    with build_daily. EF / decoupling / VI / TIS / HR fields deferred → None."""
+    by, start, end, cp_at, _wp, _pm, fb = _series(summaries)
+    rows = []
+    for d in sorted(by):
+        ftp = cp_at.get(d) or fb
+        for r in by[d]:
+            tss, if_ = _ride_tss(r, ftp)
+            mmp = r.get("mmp") or {}
+            sport = (r.get("sport") or "Ride")
+            rows.append({
+                "date": d, "started_at": r.get("start") or f"{d}T00:00:00",
+                "activity_type": sport, "is_cycling": 1 if "ride" in sport.lower() else 0,
+                "duration_sec": r["duration_s"],
+                "tss": round(tss, 1), "work_kj": round((r.get("avg") or r["np"]) * r["duration_s"] / 1000.0),
+                "np_w": round(r["np"], 1), "if_": round(if_, 3),
+                "p5s_w": mmp.get("5"), "p1min_w": mmp.get("60"), "p5min_w": mmp.get("300"),
+                "p10min_w": None, "p20min_w": mmp.get("1200"), "p1hr_w": None,
+                "avg_hr_bpm": None, "ef": None, "vi": None, "pwhr_pct": None,
+                "anaerobic_tis": None, "aerobic_tis": None,
+                "source_file": "strava",
+            })
     return rows
 
 
@@ -118,21 +148,22 @@ if __name__ == "__main__":          # Stage-1 verify: engine output, end-to-end,
     HERE = os.path.dirname(__file__)
     summ = list(json.load(open(os.path.join(HERE, ".strava_summaries.json"))).values())
     rows = build_daily(summ)
-    print(f"built {len(rows)} daily rows  {rows[0]['date']} .. {rows[-1]['date']}")
+    wos = build_workouts(summ)
+    print(f"built {len(rows)} daily rows + {len(wos)} workout rows  {rows[0]['date']} .. {rows[-1]['date']}")
     last = rows[-1]
-    print("latest:", {k: last[k] for k in ("date", "tss_sum", "ctl", "atl", "tsb", "mftp_w", "frc_kj", "pmax_w")})
+    print("latest daily:", {k: last[k] for k in ("date", "tss_sum", "ctl", "atl", "tsb", "mftp_w", "frc_kj", "pmax_w")})
 
     db = sqlite3.connect(os.path.join(HERE, "..", "slice0", "wko.db"))
-    wko = {r[0]: r[1:] for r in db.execute(
-        "SELECT date,ctl,mftp_w FROM daily WHERE is_projected=0")}
+    wko = {r[0]: r[1:] for r in db.execute("SELECT date,ctl,mftp_w FROM daily WHERE is_projected=0")}
 
     def pear(p):
         n = len(p)
+        if n < 3: return None
         mx = sum(a for a, _ in p) / n; my = sum(b for _, b in p) / n
         cov = sum((a - mx) * (b - my) for a, b in p)
         vx = sum((a - mx) ** 2 for a, _ in p) ** .5; vy = sum((b - my) ** 2 for _, b in p) ** .5
         return cov / (vx * vy) if vx and vy else None
 
-    cpair = [(r["ctl"], wko[r["date"]][0]) for r in rows if r["date"] in wko and wko[r["date"]][0] is not None]
+    cpair = [(r["ctl"], wko[r["date"]][0]) for r in rows[60:] if r["date"] in wko and wko[r["date"]][0] is not None]
     fpair = [(r["mftp_w"], wko[r["date"]][1]) for r in rows if r["date"] in wko and r["mftp_w"] and wko[r["date"]][1]]
-    print(f"END-TO-END (our CP as FTP, no WKO5 input):  CTL r={pear(cpair):.3f}  mFTP r={pear(fpair):.3f}")
+    print(f"END-TO-END (warm, no WKO5):  CTL r={pear(cpair):.3f}  mFTP r={pear(fpair):.3f}")
