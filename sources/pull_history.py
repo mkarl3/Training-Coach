@@ -5,9 +5,11 @@ needs. FTP is applied later (at compute time) so it can be tuned without re-pull
 """
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import time
+import urllib.error
 
 from .strava_client import list_activities, get_streams
 
@@ -38,16 +40,98 @@ def mmp(watts, k):
     return max((cs[i + k] - cs[i]) / k for i in range(len(watts) - k + 1))
 
 
-def summarize(act_summary, watts):
+def power_histogram(watts, bin_w=10):
+    """Seconds spent in each 10 W bucket (assumes ~1 Hz). Compact + FTP-agnostic: TiZ zones are
+    recomputed from this at build time, so changing FTP re-buckets correctly."""
+    h = {}
+    for w in watts:
+        if w is None:
+            continue
+        b = int(w // bin_w) * bin_w
+        h[b] = h.get(b, 0) + 1
+    return {str(k): v for k, v in h.items()}
+
+
+def decoupling(watts, hr, min_sec=2400):
+    """Aerobic (Pw:HR) decoupling % — first-half vs second-half power:HR efficiency. Standard long-
+    ride durability read; None for rides under ~40 min or missing HR. Positive = HR drifted up
+    relative to power (cardiac drift / lost durability)."""
+    n = min(len(watts), len(hr))
+    if n < min_sec:
+        return None
+    half = n // 2
+
+    def ef(ws, hs):
+        pw = [w for w in ws if w is not None]
+        hh = [h for h in hs if h]
+        if not pw or not hh:
+            return None
+        return (sum(pw) / len(pw)) / (sum(hh) / len(hh))
+    e1, e2 = ef(watts[:half], hr[:half]), ef(watts[half:n], hr[half:n])
+    if not e1 or not e2:
+        return None
+    return round((e1 - e2) / e1 * 100, 1)               # +% = efficiency dropped in 2nd half
+
+
+def _r1(v):
+    """Round to 1dp, but pass through None — mmp/NP return None for rides shorter than the window
+    (or <30s), and that must stay None, not crash."""
+    return round(v, 1) if v is not None else None
+
+
+def _label(act_summary):
+    """Identity fields for the training-log cell — all from the activity summary (no stream cost)."""
+    m = act_summary.get("map") or {}
+    dist = act_summary.get("distance")
+    elev = act_summary.get("total_elevation_gain")
+    return {
+        "name": act_summary.get("name"),
+        "start": act_summary.get("start_date_local") or act_summary.get("start_date"),
+        "polyline": m.get("summary_polyline") or None,         # encoded route; None for indoor
+        "distance_mi": round(dist / 1609.34, 1) if dist else None,
+        "elev_ft": round(elev * 3.28084) if elev else None,
+    }
+
+
+def summarize(act_summary, watts, hr=None):
+    np_ = normalized_power(watts) if watts else None
     return {
         "id": str(act_summary["id"]),
         "date": (act_summary.get("start_date_local") or act_summary["start_date"])[:10],
         "sport": act_summary.get("sport_type") or act_summary.get("type"),
         "duration_s": int(act_summary.get("moving_time") or act_summary.get("elapsed_time") or 0),
-        "np": round(normalized_power(watts), 1) if watts else None,
+        "np": _r1(np_),
         "avg": act_summary.get("average_watts"),
-        "mmp": {str(k): (round(mmp(watts, k), 1) if watts else None) for k in WINDOWS},
+        "avg_hr": act_summary.get("average_heartrate"),       # for EF (= NP / avg HR)
+        "decoupling": decoupling(watts, hr) if (watts and hr) else None,
+        "mmp": {str(k): _r1(mmp(watts, k) if watts else None) for k in WINDOWS},
+        "phist": power_histogram(watts) if watts else {},      # → power-zone TiZ at build time
+        **_label(act_summary),                                 # name / route / distance / elevation
     }
+
+
+def enrich_labels() -> dict:
+    """Backfill name/polyline/distance/elev onto cached rides that predate those fields. These live
+    in the activity SUMMARY (not streams), so this only re-lists — cheap, no per-ride stream calls."""
+    cache = load_cache()
+    need = {sid for sid, s in cache.items() if "name" not in s}
+    if not need:
+        return {"patched": 0, "total": len(cache)}
+    patched, page = 0, 1
+    while need:
+        acts = list_activities(per_page=100, page=page)
+        if not acts:
+            break
+        for a in acts:
+            sid = str(a["id"])
+            if sid in need:
+                cache[sid].update(_label(a))
+                need.discard(sid)
+                patched += 1
+        page += 1
+    with open(CACHE, "w") as f:
+        json.dump(cache, f)
+    return {"patched": patched, "total": len(cache)}
 
 
 def load_cache() -> dict:
@@ -57,36 +141,63 @@ def load_cache() -> dict:
     return {}
 
 
-def pull(days_back=DAYS_BACK):
+def latest_cached_epoch(cache) -> int | None:
+    if not cache:
+        return None
+    mx = max(s["date"] for s in cache.values())
+    return int(dt.datetime.fromisoformat(mx + "T00:00:00").timestamp())
+
+
+def pull(full=False, after=None, days_back=None) -> dict:
+    """Fetch rides → compact summaries, cached + resumable. Default = INCREMENTAL (only rides newer
+    than the latest cached day) — fast, the daily-button case. full=True (or empty cache) walks the
+    whole history; that's many calls, so it's paced and resumes after a rate-limit. Returns a
+    summary dict (never raises on 429 — sets rate_limited so the caller can say "click again")."""
     cache = load_cache()
-    after = int(time.time()) - days_back * 86400
-    page, fetched, skipped = 1, 0, 0
-    while True:
-        acts = list_activities(per_page=50, page=page, after=after)
-        if not acts:
-            break
-        for a in acts:
-            sid = str(a["id"])
-            if sid in cache:
-                skipped += 1
-                continue
-            try:
-                streams = get_streams(a["id"], keys=("time", "watts"))
-                watts = streams.get("watts") or []
-            except Exception as e:
-                watts = []
-                print(f"  (no streams for {sid}: {e})")
-            cache[sid] = summarize(a, watts)
-            fetched += 1
-            with open(CACHE, "w") as f:                   # persist after each ride (resumable)
-                json.dump(cache, f)
-            time.sleep(0.25)                              # pace under 200 req / 15 min
-        page += 1
-    print(f"done: {fetched} new, {skipped} cached, {len(cache)} total in {CACHE}")
-    rides = [s for s in cache.values() if (s.get("mmp") or {}).get('300')]
-    print(f"rides with power: {sum(1 for s in cache.values() if s['np'])}; "
-          f"date range: {min(s['date'] for s in cache.values())} .. {max(s['date'] for s in cache.values())}")
+    if after is None:
+        if days_back is not None:
+            after = int(time.time()) - days_back * 86400
+        elif not full and cache:
+            after = latest_cached_epoch(cache)            # incremental
+        # else (full, or empty cache): after stays None -> all history
+    page, fetched, skipped, rate_limited = 1, 0, 0, False
+    try:
+        while True:
+            acts = list_activities(per_page=50, page=page, after=after)
+            if not acts:
+                break
+            for a in acts:
+                sid = str(a["id"])
+                if sid in cache:
+                    skipped += 1
+                    continue
+                try:
+                    streams = get_streams(a["id"], keys=("time", "watts", "heartrate"))
+                    watts = streams.get("watts") or []
+                    hr = streams.get("heartrate") or []
+                except urllib.error.HTTPError as e:
+                    if e.code == 429:
+                        raise                             # bubble to the outer handler
+                    watts, hr = [], []                    # non-rate-limit (e.g. no streams) → skip power
+                cache[sid] = summarize(a, watts, hr)
+                fetched += 1
+                with open(CACHE, "w") as f:               # persist after each ride (resumable)
+                    json.dump(cache, f)
+                time.sleep(0.3)                           # pace under 200 req / 15 min
+            page += 1
+    except urllib.error.HTTPError as e:
+        if e.code != 429:
+            raise
+        rate_limited = True                               # stop gracefully; cache holds progress
+
+    return {"fetched": fetched, "skipped": skipped, "total": len(cache),
+            "rides_with_power": sum(1 for s in cache.values() if s.get("np")),
+            "rate_limited": rate_limited,
+            "date_min": min((s["date"] for s in cache.values()), default=None),
+            "date_max": max((s["date"] for s in cache.values()), default=None)}
 
 
 if __name__ == "__main__":
-    pull()
+    import sys
+    res = pull(full=("--full" in sys.argv))
+    print(res)
