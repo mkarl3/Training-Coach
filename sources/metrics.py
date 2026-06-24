@@ -84,6 +84,21 @@ def _ride_tss(ride, ftp):
     return (ride["duration_s"] / 3600) * if_ ** 2 * 100, if_
 
 
+# Classic 6-zone power model as fractions of FTP (Coggan boundaries), mapped to tiz_pwr_z1..z6.
+_ZONE_FRAC = [0.0, 0.55, 0.75, 0.90, 1.05, 1.20, 1e9]
+
+
+def _accumulate_tiz(secs, phist, ftp):
+    """Add a ride's power histogram ({watt_bin: seconds}) into the 6 zone-second buckets."""
+    for b, sec in (phist or {}).items():
+        w = int(b) + 5                                    # 10 W bin midpoint
+        frac = w / ftp
+        for zi in range(6):
+            if _ZONE_FRAC[zi] <= frac < _ZONE_FRAC[zi + 1]:
+                secs[zi] += sec
+                break
+
+
 def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[dict]:
     """Daily rows shaped for the app's `daily` table, computed purely from ride summaries.
 
@@ -100,25 +115,33 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
         ftp = load_ftp or cp_at.get(d) or fb
         rides = by.get(d, [])
         tss = work = dur = 0.0
+        tiz = [0, 0, 0, 0, 0, 0]
+        ifs = []
         for r in rides:
-            t, _ = _ride_tss(r, ftp)
+            t, if_ = _ride_tss(r, ftp)
             tss += t
             dur += r["duration_s"]
             work += (r.get("avg") or r["np"]) * r["duration_s"] / 1000.0
+            ifs.append(if_)
+            _accumulate_tiz(tiz, r.get("phist"), ftp)
         ctl = _ewma(ctl, tss, CTL_TC)
         atl = _ewma(atl, tss, ATL_TC)
         cp = cp_at.get(d)
-        rows.append({
+        row = {
             "date": d, "year": int(d[:4]), "is_projected": 0,
             "has_ride": 1 if rides else 0, "num_workouts": len(rides),
             "tss_sum": round(tss, 1), "duration_sec": int(dur) or 0,
             "work_kj": round(work) or None,
+            "if_daily": round(sum(ifs) / len(ifs), 3) if ifs else None,   # display-only
             "atl": round(atl, 1), "ctl": round(ctl, 1), "tsb": round(ctl - atl, 1),
             "mftp_w": round(cp) if cp else None,
             "frc_kj": round(wprime_at[d] / 1000, 1) if wprime_at[d] else None,
             "pmax_w": round(pmax_at[d]) if pmax_at[d] else None,
-            "tte_sec": None, "if_daily": None,
-        })
+            "tte_sec": None,
+        }
+        for zi in range(6):                               # tiz_pwr_z1_sec .. z6_sec
+            row[f"tiz_pwr_z{zi + 1}_sec"] = int(tiz[zi]) if rides else None
+        rows.append(row)
     return rows
 
 
@@ -134,6 +157,7 @@ def build_workouts(summaries: list[dict], load_ftp: float | None = None) -> list
             tss, if_ = _ride_tss(r, ftp)
             mmp = r.get("mmp") or {}
             sport = (r.get("sport") or "Ride")
+            avg_hr = r.get("avg_hr")
             rows.append({
                 "date": d, "started_at": r.get("start") or f"{d}T00:00:00",
                 "activity_type": sport, "is_cycling": 1 if "ride" in sport.lower() else 0,
@@ -142,7 +166,9 @@ def build_workouts(summaries: list[dict], load_ftp: float | None = None) -> list
                 "np_w": round(r["np"], 1), "if_": round(if_, 3),
                 "p5s_w": mmp.get("5"), "p1min_w": mmp.get("60"), "p5min_w": mmp.get("300"),
                 "p10min_w": None, "p20min_w": mmp.get("1200"), "p1hr_w": None,
-                "avg_hr_bpm": None, "ef": None, "vi": None, "pwhr_pct": None,
+                "avg_hr_bpm": avg_hr,
+                "ef": round(r["np"] / avg_hr, 2) if avg_hr else None,    # NP/HR efficiency factor
+                "vi": None, "pwhr_pct": r.get("decoupling"),            # Pw:HR aerobic decoupling %
                 "anaerobic_tis": None, "aerobic_tis": None,
                 "source_file": "strava",
             })

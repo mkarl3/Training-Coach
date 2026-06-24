@@ -40,13 +40,46 @@ def mmp(watts, k):
     return max((cs[i + k] - cs[i]) / k for i in range(len(watts) - k + 1))
 
 
+def power_histogram(watts, bin_w=10):
+    """Seconds spent in each 10 W bucket (assumes ~1 Hz). Compact + FTP-agnostic: TiZ zones are
+    recomputed from this at build time, so changing FTP re-buckets correctly."""
+    h = {}
+    for w in watts:
+        if w is None:
+            continue
+        b = int(w // bin_w) * bin_w
+        h[b] = h.get(b, 0) + 1
+    return {str(k): v for k, v in h.items()}
+
+
+def decoupling(watts, hr, min_sec=2400):
+    """Aerobic (Pw:HR) decoupling % — first-half vs second-half power:HR efficiency. Standard long-
+    ride durability read; None for rides under ~40 min or missing HR. Positive = HR drifted up
+    relative to power (cardiac drift / lost durability)."""
+    n = min(len(watts), len(hr))
+    if n < min_sec:
+        return None
+    half = n // 2
+
+    def ef(ws, hs):
+        pw = [w for w in ws if w is not None]
+        hh = [h for h in hs if h]
+        if not pw or not hh:
+            return None
+        return (sum(pw) / len(pw)) / (sum(hh) / len(hh))
+    e1, e2 = ef(watts[:half], hr[:half]), ef(watts[half:n], hr[half:n])
+    if not e1 or not e2:
+        return None
+    return round((e1 - e2) / e1 * 100, 1)               # +% = efficiency dropped in 2nd half
+
+
 def _r1(v):
     """Round to 1dp, but pass through None — mmp/NP return None for rides shorter than the window
     (or <30s), and that must stay None, not crash."""
     return round(v, 1) if v is not None else None
 
 
-def summarize(act_summary, watts):
+def summarize(act_summary, watts, hr=None):
     np_ = normalized_power(watts) if watts else None
     return {
         "id": str(act_summary["id"]),
@@ -55,7 +88,10 @@ def summarize(act_summary, watts):
         "duration_s": int(act_summary.get("moving_time") or act_summary.get("elapsed_time") or 0),
         "np": _r1(np_),
         "avg": act_summary.get("average_watts"),
+        "avg_hr": act_summary.get("average_heartrate"),       # for EF (= NP / avg HR)
+        "decoupling": decoupling(watts, hr) if (watts and hr) else None,
         "mmp": {str(k): _r1(mmp(watts, k) if watts else None) for k in WINDOWS},
+        "phist": power_histogram(watts) if watts else {},      # → power-zone TiZ at build time
     }
 
 
@@ -97,13 +133,14 @@ def pull(full=False, after=None, days_back=None) -> dict:
                     skipped += 1
                     continue
                 try:
-                    streams = get_streams(a["id"], keys=("time", "watts"))
+                    streams = get_streams(a["id"], keys=("time", "watts", "heartrate"))
                     watts = streams.get("watts") or []
+                    hr = streams.get("heartrate") or []
                 except urllib.error.HTTPError as e:
                     if e.code == 429:
                         raise                             # bubble to the outer handler
-                    watts = []                            # non-rate-limit (e.g. no streams) → skip power
-                cache[sid] = summarize(a, watts)
+                    watts, hr = [], []                    # non-rate-limit (e.g. no streams) → skip power
+                cache[sid] = summarize(a, watts, hr)
                 fetched += 1
                 with open(CACHE, "w") as f:               # persist after each ride (resumable)
                     json.dump(cache, f)
