@@ -1,0 +1,6 @@
+# Watt Smith — Strava credentials. Paste your two values after the = signs, then save.
+# Get them from https://www.strava.com/settings/api (after you create your app).
+# This file is private — keep it on your machine, don't share or commit it.
+
+STRAVA_CLIENT_ID= 260629
+STRAVA_CLIENT_SECRET= 8fb3d69c0d7c64dcff23bfab7e9bd30835cd5f7e
