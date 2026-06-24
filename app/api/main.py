@@ -898,6 +898,28 @@ def strava_pull(full: bool = Query(False)):
                                  + traceback.format_exc()[-800:])
 
 
+@app.get("/api/log")
+def training_log(year: int = Query(None), month: int = Query(None)):
+    """Training-log month: per-day ride cards (zone-colored) + weekly TSS/Fitness actual-vs-plan.
+    Built from the Strava cache + the live actual daily series + the plan."""
+    _require_loaded()
+    import pandas as pd
+    from sources import pull_history, build_db, log as wlog
+    ao = datetime.date.fromisoformat(_S["as_of"])
+    year, month = year or ao.year, month or ao.month
+    ftp = build_db._config_ftp() or 200
+    summaries = list(pull_history.load_cache().values())
+    daily_actual = {}
+    m = _S.get("m")
+    if m is not None:
+        for ts in m.daily.index:
+            c, t = m.daily.at[ts, "ctl"], m.daily.at[ts, "tss_sum"]
+            daily_actual[ts.strftime("%Y-%m-%d")] = {
+                "ctl": None if pd.isna(c) else float(c),
+                "tss_sum": None if pd.isna(t) else float(t)}
+    return wlog.build_month(summaries, daily_actual, _S.get("plan"), ftp, year, month)
+
+
 # ---------------- athlete profile ----------------
 _INT_FIELDS = {"birth_year", "floor_hold_weeks", "floor_window_months"}
 _STR_FIELDS = {"name", "units", "week_starts_on"}

@@ -79,6 +79,20 @@ def _r1(v):
     return round(v, 1) if v is not None else None
 
 
+def _label(act_summary):
+    """Identity fields for the training-log cell — all from the activity summary (no stream cost)."""
+    m = act_summary.get("map") or {}
+    dist = act_summary.get("distance")
+    elev = act_summary.get("total_elevation_gain")
+    return {
+        "name": act_summary.get("name"),
+        "start": act_summary.get("start_date_local") or act_summary.get("start_date"),
+        "polyline": m.get("summary_polyline") or None,         # encoded route; None for indoor
+        "distance_mi": round(dist / 1609.34, 1) if dist else None,
+        "elev_ft": round(elev * 3.28084) if elev else None,
+    }
+
+
 def summarize(act_summary, watts, hr=None):
     np_ = normalized_power(watts) if watts else None
     return {
@@ -92,7 +106,32 @@ def summarize(act_summary, watts, hr=None):
         "decoupling": decoupling(watts, hr) if (watts and hr) else None,
         "mmp": {str(k): _r1(mmp(watts, k) if watts else None) for k in WINDOWS},
         "phist": power_histogram(watts) if watts else {},      # → power-zone TiZ at build time
+        **_label(act_summary),                                 # name / route / distance / elevation
     }
+
+
+def enrich_labels() -> dict:
+    """Backfill name/polyline/distance/elev onto cached rides that predate those fields. These live
+    in the activity SUMMARY (not streams), so this only re-lists — cheap, no per-ride stream calls."""
+    cache = load_cache()
+    need = {sid for sid, s in cache.items() if "name" not in s}
+    if not need:
+        return {"patched": 0, "total": len(cache)}
+    patched, page = 0, 1
+    while need:
+        acts = list_activities(per_page=100, page=page)
+        if not acts:
+            break
+        for a in acts:
+            sid = str(a["id"])
+            if sid in need:
+                cache[sid].update(_label(a))
+                need.discard(sid)
+                patched += 1
+        page += 1
+    with open(CACHE, "w") as f:
+        json.dump(cache, f)
+    return {"patched": patched, "total": len(cache)}
 
 
 def load_cache() -> dict:

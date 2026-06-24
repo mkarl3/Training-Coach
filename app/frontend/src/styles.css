@@ -461,6 +461,60 @@ textarea:focus { outline: 2px solid var(--jacket); }
 @media (max-width: 1024px) { .trend-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .appbar { flex-wrap: wrap; } .coach-drawer { height: 86vh; } .coachbar-txt p { white-space: normal; } }
 
+/* ===== Training Log (Strava daily grid) ===== */
+.cal-viewtoggle { display: flex; gap: 6px; margin: 4px 6px 12px; }
+.cal-viewtoggle button { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em;
+  background: var(--panel-2); color: var(--ink-2); border: 0; padding: 8px 18px; cursor: pointer; box-shadow: 3px 3px 0 #00000088; }
+.cal-viewtoggle button.on { background: var(--gold); color: #0b0b14; }
+.cal-log { padding: 14px 16px; }
+.log-head { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 12px; }
+.log-title { font-size: 13px; color: var(--gold); text-shadow: 2px 2px 0 var(--red); letter-spacing: 1px; }
+.log-nav { font-family: var(--data); font-size: 20px; background: var(--panel-2); color: var(--cream); border: 0; width: 32px; height: 30px; cursor: pointer; box-shadow: 2px 2px 0 #00000088; }
+.log-nav:hover { background: var(--jacket); }
+.log-dow { display: grid; grid-template-columns: repeat(7, 1fr) 56px; gap: 4px; margin-bottom: 4px; }
+.log-dow span { font-family: var(--data); font-size: 10px; color: var(--ink-3); text-transform: uppercase; text-align: center; }
+.log-dow .gw { color: var(--ink-2); }
+.log-grid { display: grid; grid-template-columns: repeat(7, 1fr) 56px; gap: 4px; }
+.log-cell { text-align: left; background: var(--panel-3); border: 0; border-top: 5px solid var(--line); border-radius: 0 0 3px 3px;
+  padding: 4px 7px 6px; min-height: 104px; position: relative; cursor: pointer; box-shadow: inset 0 0 0 1px #07070e55; color: var(--cream); display: flex; flex-direction: column; }
+.log-cell:hover { box-shadow: inset 0 0 0 1px var(--ink-3); }
+.log-cell.off, .log-rest.off { opacity: 0.4; }
+.log-rest { background: #141d34; border-radius: 3px; min-height: 104px; position: relative; box-shadow: inset 0 0 0 1px #07070e55; }
+.log-rest span, .lc-dom { font-family: var(--data); font-size: 10px; color: var(--ink-3); position: absolute; top: 3px; right: 6px; }
+.log-rest span { color: #46557e; }
+.lc-multi { position: absolute; top: 3px; left: 6px; font-family: var(--data); font-size: 9px; color: var(--gold); }
+.lc-name { font-size: 11px; font-weight: 600; line-height: 1.15; margin: 4px 0 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-big { font-family: var(--data); font-size: 14px; font-weight: 600; }
+.lc-sub { font-family: var(--data); font-size: 9.5px; color: var(--ink-2); font-weight: 400; }
+.log-route { width: 100%; height: 30px; display: block; margin-top: auto; }
+.log-glyph { font-family: var(--data); font-size: 9px; color: var(--ink-3); text-align: center; margin-top: auto; padding-top: 6px; }
+.log-gut { display: flex; flex-direction: column; justify-content: center; gap: 8px; padding-left: 2px; }
+.lg-lab { font-family: var(--data); font-size: 8px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.lg-val { font-family: var(--data); font-size: 12px; color: var(--cream); }
+.lg-val.ok { color: var(--green); } .lg-val.under { color: var(--gold); } .lg-val.muted { color: var(--ink-2); }
+.log-legend { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 12px; font-family: var(--data); font-size: 10px; color: var(--ink-2); }
+.log-legend i { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; margin-right: 3px; }
+.log-legend .muted { color: var(--ink-3); }
+
+.log-detail { margin-top: 14px; }
+.ld-head { display: flex; align-items: center; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.ld-head .del { margin-left: auto; }
+.ld-ride { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.ld-ride:last-child { border-bottom: 0; }
+.ld-name { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 9px; margin-bottom: 9px; }
+.ld-badge { font-family: var(--data); font-size: 9px; text-transform: uppercase; background: var(--panel-2); color: var(--ink-2); padding: 1px 7px; }
+.ld-zone { font-family: var(--data); font-size: 11px; margin-left: auto; }
+.ld-stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
+.lstat-k { font-family: var(--data); font-size: 9.5px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.lstat-v { font-family: var(--data); font-size: 18px; font-weight: 600; color: var(--cream); }
+.ld-tiz { display: flex; height: 14px; border-radius: 3px; overflow: hidden; box-shadow: inset 0 0 0 1px #07070e; margin-bottom: 9px; }
+.ld-peaks { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ld-peak { font-family: var(--data); font-size: 11px; color: var(--ink-2); background: var(--panel-3); padding: 2px 8px; }
+.ld-pr { font-family: var(--data); font-size: 11px; color: #0b0b14; background: var(--gold); padding: 2px 8px; }
+.ld-map { margin-top: 10px; background: var(--panel-3); box-shadow: inset 0 0 0 1px var(--line); border-radius: 3px; padding: 4px; }
+.ld-map .log-route { height: 80px; }
+@media (max-width: 720px) { .log-cell, .log-rest { min-height: 84px; } .lc-name { font-size: 10px; } }
+
 /* ===== Merged dashboard card (hero + phase fused: Wattson read + vitals + gate visual) ===== */
 .merged-card { padding: 16px 18px; }
 .mc-grid { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: start; }
