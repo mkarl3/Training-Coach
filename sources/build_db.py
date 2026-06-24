@@ -27,9 +27,22 @@ def _insert(conn, table, rows):
                      [[r.get(c) for c in cols] for r in rows])
 
 
-def build_db(summaries: list[dict], out_path: str = DEFAULT_OUT) -> dict:
-    daily = build_daily(summaries)
-    workouts = build_workouts(summaries)
+def _config_ftp() -> float | None:
+    """The athlete's set threshold FTP for TSS (WKO5 'bikeFTP'), from strava_config.txt FTP=…
+    Distinct from the modeled CP used by the gates. None → fall back to CP (runs hot)."""
+    from .strava_auth import _read_config
+    v = _read_config().get("FTP")
+    try:
+        return float(v) if v else None
+    except ValueError:
+        return None
+
+
+def build_db(summaries: list[dict], out_path: str = DEFAULT_OUT, load_ftp: float | None = None) -> dict:
+    if load_ftp is None:
+        load_ftp = _config_ftp()
+    daily = build_daily(summaries, load_ftp=load_ftp)
+    workouts = build_workouts(summaries, load_ftp=load_ftp)
     if not daily:
         raise RuntimeError("no rides with power in the cache — nothing to build")
 
@@ -50,7 +63,7 @@ def build_db(summaries: list[dict], out_path: str = DEFAULT_OUT) -> dict:
     conn.close()
     os.replace(tmp, out_path)                        # atomic swap
     return {"path": out_path, "daily_rows": len(daily), "workouts": len(workouts),
-            "date_min": daily[0]["date"], "date_max": daily[-1]["date"]}
+            "date_min": daily[0]["date"], "date_max": daily[-1]["date"], "load_ftp": load_ftp}
 
 
 if __name__ == "__main__":

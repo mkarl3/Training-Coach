@@ -84,15 +84,20 @@ def _ride_tss(ride, ftp):
     return (ride["duration_s"] / 3600) * if_ ** 2 * 100, if_
 
 
-def build_daily(summaries: list[dict]) -> list[dict]:
-    """Daily rows shaped for the app's `daily` table, computed purely from ride summaries."""
+def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[dict]:
+    """Daily rows shaped for the app's `daily` table, computed purely from ride summaries.
+
+    load_ftp = the athlete's THRESHOLD/set FTP used for TSS & IF (WKO5's "bikeFTP"). This is a
+    DIFFERENT number from the modeled CP/mFTP used by the gates: TSS ∝ 1/FTP², so dividing by the
+    lower modeled CP (~182) instead of the set threshold (~208) inflates every TSS ~30%. When
+    load_ftp is None we fall back to CP (self-consistent but hot). mftp_w stays = CP for the gates."""
     by, start, end, cp_at, wprime_at, pmax_at, fb = _series(summaries)
     if not by:
         return []
     ctl = atl = None
     rows = []
     for d in _drange(start, end):
-        ftp = cp_at.get(d) or fb
+        ftp = load_ftp or cp_at.get(d) or fb
         rides = by.get(d, [])
         tss = work = dur = 0.0
         for r in rides:
@@ -117,13 +122,14 @@ def build_daily(summaries: list[dict]) -> list[dict]:
     return rows
 
 
-def build_workouts(summaries: list[dict]) -> list[dict]:
+def build_workouts(summaries: list[dict], load_ftp: float | None = None) -> list[dict]:
     """Per-ride rows shaped for the app's `workout` table (TSS/IF/NP + PD points), FTP-consistent
-    with build_daily. EF / decoupling / VI / TIS / HR fields deferred → None."""
+    with build_daily (load_ftp = the athlete's set threshold FTP for TSS/IF). EF / decoupling /
+    VI / TIS / HR fields deferred → None."""
     by, start, end, cp_at, _wp, _pm, fb = _series(summaries)
     rows = []
     for d in sorted(by):
-        ftp = cp_at.get(d) or fb
+        ftp = load_ftp or cp_at.get(d) or fb
         for r in by[d]:
             tss, if_ = _ride_tss(r, ftp)
             mmp = r.get("mmp") or {}

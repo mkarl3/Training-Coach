@@ -97,6 +97,23 @@ export default function App() {
     }
   }
 
+  async function onStravaPull() {
+    setUpload({ state: "busy", msg: "Pulling from Strava…" });
+    try {
+      const res = await fetch(`/api/strava/pull`, { method: "POST" });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.detail || "pull failed");
+      const mt = await fetch(`/api/meta`).then((r) => r.json());
+      setMeta(mt);
+      setDataKey((k) => k + 1);
+      const note = out.rate_limited ? " (rate-limited — click again in ~15 min for the rest)" : "";
+      setUpload({ state: "ok", msg: `Synced — ${out.rides_with_power} rides, data through ${out.data_through}.${note}` });
+      setTimeout(() => setUpload({ state: "idle", msg: "" }), 8000);
+    } catch (e2) {
+      setUpload({ state: "err", msg: String(e2.message || e2) });
+    }
+  }
+
   if (err)
     return (
       <div className="shell">
@@ -134,6 +151,9 @@ export default function App() {
         <div className="appbar-actions">
           {upload.msg && <span className={"upload-msg " + upload.state}>{upload.msg}</span>}
           <input type="file" accept=".xlsx" multiple ref={fileRef} onChange={onFile} style={{ display: "none" }} />
+          <button className="update-btn" disabled={upload.state === "busy"} onClick={onStravaPull}>
+            {upload.state === "busy" ? "Syncing…" : "⟲ Pull from Strava"}
+          </button>
           <button className="update-btn" onClick={() => setCheckinOpen(true)}>✓ Check-In</button>
           <button className="update-btn" onClick={() => setShowProfile(true)}>⚙ Profile</button>
           <button className="update-btn" disabled={upload.state === "busy"} onClick={() => fileRef.current?.click()}>

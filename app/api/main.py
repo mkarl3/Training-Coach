@@ -20,6 +20,7 @@ APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROOT = os.path.dirname(APP_DIR)
 for p in ("slice4", "slice3", "slice2", "slice1", "slice0"):
     sys.path.insert(0, os.path.join(ROOT, p))
+sys.path.insert(0, ROOT)                                  # for the `sources` package (Strava ingest)
 
 from wko_metrics import metrics, detectors, profile, AthleteProfile, DEFAULT_PROFILE  # noqa: E402
 from watchman import (select, build_trend, DEFAULT_SELECTION, apply_life_events, load_life_events,  # noqa: E402
@@ -848,6 +849,53 @@ async def upload(files: list[UploadFile] = File(...), intake: bool = Query(False
     _load_training_data()
     return {"ok": True, "files": [n for _, _, n in written], "sheets": sorted(all_sheets),
             "data_through": _S["as_of"], "board_status": _S["status"]}
+
+
+def _swap_db(staging, dst):
+    """Replace dst's CONTENTS in place via SQLite's backup API, instead of renaming over it.
+    Under OneDrive (this project's folder is synced) the cloud client keeps a persistent handle
+    on wko.db, so os.replace(...) → PermissionError [WinError 5]. Writing into the existing file
+    sidesteps that — OneDrive blocks rename/delete, not writes."""
+    src = sqlite3.connect(staging)
+    d = sqlite3.connect(dst)
+    try:
+        src.backup(d)
+        d.commit()
+    finally:
+        d.close()
+        src.close()
+    try:
+        os.remove(staging)
+    except OSError:
+        pass
+
+
+@app.post("/api/strava/pull")
+def strava_pull(full: bool = Query(False)):
+    """Pull rides from Strava (incremental by default; full=True walks all history), rebuild the
+    Strava-sourced DB, and hot-swap it in — same atomic + reload pattern as /api/upload. The first
+    swap backs up the existing (WKO5) DB to wko.db.wko5bak so it's recoverable."""
+    import shutil
+    import traceback
+    from sources import pull_history, build_db
+    try:
+        res = pull_history.pull(full=full)
+        summ = list(pull_history.load_cache().values())
+        if not any(s.get("np") for s in summ):
+            raise HTTPException(400, "No power rides available from Strava yet — nothing to build.")
+        staging = WKO_DB + ".strava"
+        build_db.build_db(summ, out_path=staging)
+        bak = WKO_DB + ".wko5bak"
+        if os.path.exists(WKO_DB) and not os.path.exists(bak):
+            shutil.copy2(WKO_DB, bak)                      # one-time WKO5 backup
+        _swap_db(staging, WKO_DB)                         # in-place (OneDrive locks rename, not writes)
+        _load_training_data()
+        return {"ok": True, "data_through": _S["as_of"], "board_status": _S["status"], **res}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Strava pull failed at: {type(e).__name__}: {e}\n"
+                                 + traceback.format_exc()[-800:])
 
 
 # ---------------- athlete profile ----------------
