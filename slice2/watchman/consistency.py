@@ -4,19 +4,20 @@ A four-heart vitality gauge. Two tiers, one boundary, two owners:
   • Above the line (hearts 2-4) — THIS module owns it: an ungated, plan-independent weekly-adherence
     buffer. Show up → hearts hold/climb; miss → hearts drop. Clamps [2,4]; never reaches 1.
   • The flag (heart 1) — the gap_unravel detector owns it. We only REFLECT select()'s decision and
-    reset_satisfied()'s stand-down. We never decide the flag and never substitute a clean-week count
-    for the detector's real reset.
+    reset_satisfied()'s stand-down. We never decide the flag and never substitute a clean-week count.
 
-Deterministic: same (findings, today, m) → same reading (mirrors select()). All heart arithmetic is
-here in Python; the React component renders only. Nothing in this module edits detectors, the
-Finding schema, the detector_family enum, or gap_unravel's reset logic — it imports and reflects.
+The clean/miss predicate + its constant now live in wko_metrics.consistency (Slice 1) so the Prep
+progression gate shares the EXACT same definition — re-exported here for the gauge's existing API.
+Deterministic; all heart arithmetic is Python, the React component renders only.
 """
 from __future__ import annotations
 
 import pandas as pd
 
 from wko_metrics.config import DETECTORS
-from .config import DEFAULT_SELECTION, CONSISTENCY_CLEAN_MIN_RIDE_DAYS
+from wko_metrics.consistency import (CONSISTENCY_CLEAN_MIN_RIDE_DAYS,  # noqa: F401  (re-exported)
+                                     consecutive_miss_weeks, clean_week_streak, week_active_days)
+from .config import DEFAULT_SELECTION
 from .select import select, reset_satisfied
 
 # FROZEN render maps (handoff §7) — kept here (not in JS) so the component computes nothing and the
@@ -24,50 +25,6 @@ from .select import select, reset_satisfied
 HEART_COLOR = {4: "red", 3: "red", 2: "yellow", 1: "flash"}     # 1 = filled heart strobes red↔cream
 WATTSON_MOOD = {"healthy": "approving", "caution": "calm", "warn": "alarmed", "flag": "alarmed"}
 ZONE_BY_HEARTS = {4: "healthy", 3: "caution", 2: "warn"}        # buffer zones (flag handled separately)
-
-
-def _week_active_days(has_ride: pd.Series, week_end: pd.Timestamp) -> int:
-    """Ride days in the trailing 7-day week ending (inclusive) at week_end."""
-    lo = week_end - pd.Timedelta(days=6)
-    seg = has_ride[(has_ride.index >= lo) & (has_ride.index <= week_end)]
-    return int(seg.sum())
-
-
-def _is_miss(has_ride, week_end, min_days):
-    return _week_active_days(has_ride, week_end) < min_days
-
-
-def consecutive_miss_weeks(has_ride, today, min_days, max_lookback=26) -> int:
-    """Consecutive trailing 7-day weeks (ending at `today`) that are MISSES, until the first clean
-    week. The above-line buffer reads this; it is plan-independent and ungated."""
-    if has_ride.empty:
-        return 0
-    floor = has_ride.index.min()
-    c = 0
-    for w in range(max_lookback):
-        we = today - pd.Timedelta(days=7 * w)
-        if we < floor:                                    # past the start of the data → unknown, not a miss
-            break
-        if _is_miss(has_ride, we, min_days):
-            c += 1
-        else:
-            break
-    return c
-
-
-def clean_week_streak(has_ride, today, min_days, max_lookback=104) -> int:
-    """Consecutive clean weeks ending at `today` (resets to 0 on any miss). Rendered independently
-    of the hearts."""
-    if has_ride.empty:
-        return 0
-    floor = has_ride.index.min()
-    c = 0
-    for w in range(max_lookback):
-        we = today - pd.Timedelta(days=7 * w)
-        if we < floor or _is_miss(has_ride, we, min_days):
-            break
-        c += 1
-    return c
 
 
 def derive_hearts(flagged: bool, miss_weeks: int, exit_cap: int = 99):

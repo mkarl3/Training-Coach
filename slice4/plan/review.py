@@ -141,6 +141,8 @@ def _gate_visual(prog):
                 "next_block": prog.get("next_block")}
     return {"kind": "weeks", "elapsed": prog.get("week_in_block") or 0,
             "total": prog.get("weeks_in_block") or 1, "next_block": prog.get("next_block"),
+            "weeks": prog.get("block_weeks") or [],          # per-week ride-slot detail
+            "min_ride_days": prog.get("min_ride_days") or 4,  # icons per week
             "ramp": prog.get("ctl_change_28d"), "ramp_ok": (prog.get("ctl_change_28d") or 0) >= 0}
 
 
@@ -193,9 +195,10 @@ def coach_card(hero, prog):
                 n.append(f"Your {gate.get('metric', 'gate')} is at {val}% — I want it in the {band} "
                          f"zone before we add intensity. Keep doing the extensive work and it climbs.")
         else:                                             # time / consistency gate (Prep, sub-steps)
+            mrd = gate.get("min_ride_days") or prog.get("min_ride_days") or 4
             lead = f"I'm watching your {watching} — keep it pointed up. " if watching else ""
-            n.append(f"{lead}String together {wk} steady, consistent weeks — hit at least 80% of "
-                     "what I put in front of you.")
+            n.append(f"{lead}String together {wk} steady weeks — ride at least {mrd} days a week "
+                     "(no hero days; just show up).")
             if not prog.get("min_weeks_met"):
                 n.append(f"We don't jump to {nb} before week {prog.get('min_weeks')}; the base "
                          "needs the weeks to stick.")

@@ -578,6 +578,23 @@ textarea:focus { outline: 2px solid var(--jacket); }
 .gw-flag { display: flex; flex-direction: column; align-items: center; color: var(--green); padding-left: 2px; }
 .gw-flag i { font-size: 16px; } .gw-flag span { font-family: var(--data); font-size: 8px; }
 .gate-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; font-family: var(--data); font-size: 11px; color: var(--ink-2); }
+/* per-week ride-slot track: N slots/week (= min_ride_days); fill by ride days; complete→green, current→gold, future→dim */
+.gw-weeks { display: flex; gap: 6px; margin: 2px 0; }
+.gw-wk { flex: 1; background: var(--bg); border-radius: 3px; padding: 5px 6px 6px; box-shadow: inset 0 0 0 1px var(--line); }
+.gw-wk-lab { font-family: var(--data); font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.04em; display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+.gw-wk-lab em { font-style: normal; color: #0b0b14; background: var(--gold); padding: 0 4px; font-size: 8px; }
+.gw-slots { display: flex; gap: 3px; }
+.gw-slot { flex: 1; height: 9px; border-radius: 2px; background: #243056; }
+.gw-wk.current { box-shadow: inset 0 0 0 2px var(--gold); }
+.gw-wk.current .gw-slot.on { background: var(--gold); }
+.gw-wk.complete { box-shadow: inset 0 0 0 2px var(--green); background: rgba(74,201,74,0.08); }
+.gw-wk.complete .gw-slot.on { background: var(--green); }
+.gw-wk.complete .gw-wk-lab { color: var(--green); }
+.gw-wk.missed { opacity: 0.85; }
+.gw-wk.missed .gw-slot.on { background: var(--ramp-lose); }
+.gw-wk.future { opacity: 0.5; }
+.gw-wk.future .gw-slot.on { background: var(--ink-3); }
+.gw-fallback { margin: 6px 0; }
 .gauge-track { position: relative; height: 24px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); margin-top: 16px; }
 .gauge-zone { position: absolute; top: 0; bottom: 0; background: rgba(74,201,74,0.22); box-shadow: inset 0 0 0 1px var(--green); }
 .gauge-mark { position: absolute; top: -3px; bottom: -3px; width: 3px; background: var(--cream); transform: translateX(-1px); }

@@ -1,12 +1,22 @@
 """Slice 5 phase-progression verdict logic (pure). A stubbed Metrics returns controlled
 fractional-utilization / staleness / CTL-change so each gate branch is exercised deterministically.
 The engine ADVISES only — it never recomputes a plan number."""
+import pandas as pd
+
 from plan import progression as prog
 
 
 class FakeM:
-    def __init__(self, fu=None, stale=None, chg=0.0):
+    def __init__(self, fu=None, stale=None, chg=0.0, rides=None, ride_end="2026-06-14"):
         self._fu, self._stale, self._chg = fu, stale or {}, chg
+        if rides is None:
+            self._has = pd.Series([], dtype=int, index=pd.DatetimeIndex([]))
+        else:
+            self._has = pd.Series(rides, index=pd.date_range(end=ride_end, periods=len(rides), freq="D"))
+
+    @property
+    def has_ride(self):
+        return self._has
 
     def fractional_utilization(self, as_of=None, **k):
         return self._fu
@@ -34,6 +44,28 @@ FU_LOW = {"pct": 79.0, "mftp": 174, "vo2_power": 220, "vo2_date": "2026-06-01"}
 
 def test_no_plan():
     assert prog.assess_progression(FakeM(), None, AO) == {"state": "no_plan"}
+
+
+def _prep_plan(statuses):
+    weeks = [wk(j + 1, "Prep", "base", st) for j, st in enumerate(statuses)]
+    weeks.append(wk(len(statuses) + 1, "Base 1", "base"))
+    return plan(weeks)
+
+
+def test_prep_consistency_is_ride_frequency_not_tss():
+    # Flaking (≈1 ride/wk, below the 4-day bar) → HOLD, even with fitness rising and TSS that could
+    # be hit by a hero day. Consistency = showing up, not load.
+    flaky = [1, 0, 0, 0, 0, 0, 0] * 3
+    r = prog.assess_progression(FakeM(chg=2.0, rides=flaky), _prep_plan(["elapsed", "elapsed", "current"]), AO)
+    assert r["transition_kind"] == "prep_to_base"
+    assert r["verdict"] == "HOLD" and r["gate"]["consistent"] is False
+    assert r["gate"]["min_ride_days"] == 4
+
+
+def test_prep_advances_when_consistent_and_building():
+    steady = [1, 1, 1, 1, 1, 0, 0] * 3        # 5 ride days/wk → clean
+    r = prog.assess_progression(FakeM(chg=2.0, rides=steady), _prep_plan(["elapsed", "elapsed", "current"]), AO)
+    assert r["verdict"] == "ADVANCE" and r["gate"]["consistent"] is True
 
 
 def test_future_plan_reads_not_started():
