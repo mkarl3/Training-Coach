@@ -34,6 +34,17 @@ def list_activities(per_page: int = 30, page: int = 1, after: int | None = None)
     return _get("/athlete/activities", params)
 
 
+def get_athlete_ftp() -> float | None:
+    """The athlete's CURRENT set FTP from their Strava profile (needs profile:read_all scope).
+    Returns None if not set or the scope is missing. Strava keeps only the current value — no
+    history — so callers stamp it with the date they saw it."""
+    try:
+        ftp = _get("/athlete").get("ftp")
+        return float(ftp) if ftp else None
+    except Exception:
+        return None
+
+
 def get_streams(activity_id: int,
                 keys=("time", "watts", "heartrate", "cadence")) -> dict[str, list]:
     """Per-second streams for one activity, as {key: [values]} aligned by index."""

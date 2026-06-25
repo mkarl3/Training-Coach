@@ -41,6 +41,8 @@ export default function App() {
   const [coachSeed, setCoachSeed] = useState(null);   // a reply typed on the dashboard, auto-sent on open
   const [checkinOpen, setCheckinOpen] = useState(false);
   const [view, setView] = useState("dashboard");  // "dashboard" | "calendar"
+  const [ftpPending, setFtpPending] = useState(null);   // Strava-proposed FTP awaiting accept/edit/dismiss
+  const [ftpPrefill, setFtpPrefill] = useState(null);   // value handed to the Profile editor on "Edit"
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -48,7 +50,10 @@ export default function App() {
       try {
         const st = await fetch(`/api/intake/status`).then((r) => r.json());
         setIntake(st);
-        if (st.complete) setMeta(await fetch(`/api/meta`).then((r) => r.json()));
+        if (st.complete) {
+          setMeta(await fetch(`/api/meta`).then((r) => r.json()));
+          refreshFtpPending();
+        }
       } catch (e) { setErr(String(e)); }
     })();
   }, []);
@@ -70,10 +75,38 @@ export default function App() {
   }
 
   async function refreshAfterProfile() {
+    await refreshDataOnly();
+    setShowProfile(false);
+  }
+
+  async function refreshDataOnly() {
     const mt = await fetch(`/api/meta`).then((r) => r.json());
     setMeta(mt);
-    setDataKey((k) => k + 1);
-    setShowProfile(false);
+    setDataKey((k) => k + 1);   // remount data views (FTP edit recomputes TSS without closing)
+  }
+
+  async function refreshFtpPending() {
+    try {
+      const d = await fetch(`/api/ftp-history`).then((r) => r.json());
+      setFtpPending(d.pending ? { ...d.pending, prev: d.current } : null);
+    } catch { /* ignore */ }
+  }
+
+  async function acceptFtp() {
+    await fetch(`/api/ftp-history/accept-pending`, { method: "POST" }).catch(() => {});
+    setFtpPending(null);
+    refreshDataOnly();
+  }
+
+  function editFtp() {
+    setFtpPrefill(ftpPending);          // pre-fill the Profile editor; pending stays until they add
+    setShowProfile(true);
+    setFtpPending(null);                // hide the banner while editing
+  }
+
+  async function dismissFtp() {
+    await fetch(`/api/ftp-history/dismiss-pending`, { method: "POST" }).catch(() => {});
+    setFtpPending(null);
   }
 
   async function onFile(e) {
@@ -106,6 +139,7 @@ export default function App() {
       const mt = await fetch(`/api/meta`).then((r) => r.json());
       setMeta(mt);
       setDataKey((k) => k + 1);
+      refreshFtpPending();          // surface any new Strava FTP for accept/edit/dismiss
       const note = out.rate_limited ? " (rate-limited — click again in ~15 min for the rest)" : "";
       setUpload({ state: "ok", msg: `Synced — ${out.rides_with_power} rides, data through ${out.data_through}.${note}` });
       setTimeout(() => setUpload({ state: "idle", msg: "" }), 8000);
@@ -163,7 +197,26 @@ export default function App() {
         </div>
       </div>
 
-      {showProfile && <Profile onClose={() => setShowProfile(false)} onSaved={refreshAfterProfile} />}
+      {ftpPending && (
+        <div className="ftp-notice">
+          <span className="ftp-notice-txt">
+            <b>Strava FTP changed</b> — your set FTP is now <b>{Math.round(ftpPending.ftp)} W</b>
+            {ftpPending.prev != null && <> (was {Math.round(ftpPending.prev)} W)</>}. Use it for
+            training load going forward?
+          </span>
+          <div className="ftp-notice-actions">
+            <button className="confirm" onClick={acceptFtp}>Accept</button>
+            <button className="ghost" onClick={editFtp}>Edit date…</button>
+            <button className="notice-x" onClick={dismissFtp} aria-label="Dismiss">×</button>
+          </div>
+        </div>
+      )}
+
+      {showProfile && (
+        <Profile
+          onClose={() => { setShowProfile(false); setFtpPrefill(null); refreshFtpPending(); }}
+          onSaved={refreshAfterProfile} onChanged={refreshDataOnly} prefillFtp={ftpPrefill} />
+      )}
 
       <div className="main">
         {view === "dashboard"

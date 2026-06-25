@@ -7,7 +7,81 @@ const LABELS = {
   week_starts_on: "Week starts on",
 };
 
-export default function Profile({ onClose, onSaved }) {
+function FtpHistory({ onChanged, prefill }) {
+  const [entries, setEntries] = useState(null);
+  const [date, setDate] = useState("");
+  const [ftp, setFtp] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/ftp-history").then((r) => r.json())
+      .then((d) => setEntries(d.entries || [])).catch((e) => setErr(String(e)));
+  }, []);
+
+  useEffect(() => {                                  // arrived via "Edit date…" — seed the add-form
+    if (prefill?.ftp) {
+      setFtp(String(Math.round(prefill.ftp)));
+      if (prefill.seen_date) setDate(prefill.seen_date);
+    }
+  }, [prefill]);
+
+  async function add() {
+    if (!date || !ftp) return;
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch("/api/ftp-history", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ effective_date: date, ftp: Number(ftp) }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.detail || "couldn't add");
+      setEntries(out.entries); setDate(""); setFtp("");
+      if (out.applied) onChanged?.();
+    } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
+  }
+
+  async function del(id) {
+    setBusy(true); setErr(null);
+    try {
+      const r = await fetch(`/api/ftp-history/${id}`, { method: "DELETE" });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.detail || "couldn't delete");
+      setEntries(out.entries);
+      if (out.applied) onChanged?.();
+    } catch (e) { setErr(String(e.message || e)); } finally { setBusy(false); }
+  }
+
+  return (
+    <>
+      <h3>FTP history <span>· the threshold FTP used for TSS</span></h3>
+      <p className="hint">
+        Each ride's training load is scored against the FTP that was true on its date. Values you
+        set in Strava sync in automatically on a pull; add past changes by hand. Editing recomputes
+        TSS across your whole history.
+      </p>
+      <div className="ftp-list">
+        {entries && entries.length > 0 ? entries.map((e) => (
+          <div className="ftp-row" key={e.id}>
+            <span className="ftp-date">{e.effective_date}</span>
+            <span className="ftp-val">{Math.round(e.ftp)} W</span>
+            <span className={"ftp-src " + e.source}>{e.source}</span>
+            <button className="del" onClick={() => del(e.id)} disabled={busy} aria-label="Delete entry">×</button>
+          </div>
+        )) : <p className="hint">{entries ? "No entries yet." : "Loading…"}</p>}
+      </div>
+      <div className="ftp-add">
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Effective date" />
+        <input type="number" placeholder="watts" value={ftp} min="1" max="600"
+          onChange={(e) => setFtp(e.target.value)} aria-label="FTP watts" />
+        <button onClick={add} disabled={busy || !date || !ftp}>{busy ? "Recomputing…" : "Add"}</button>
+      </div>
+      {err && <p className="hint err">{err}</p>}
+    </>
+  );
+}
+
+export default function Profile({ onClose, onSaved, onChanged, prefillFtp }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -97,6 +171,8 @@ export default function Profile({ onClose, onSaved }) {
                   : "."}
               </p>
             )}
+
+            <FtpHistory onChanged={onChanged} />
 
             <h3 className="advanced">
               Tuned values <span>⚠ advanced — change with care</span>

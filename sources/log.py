@@ -7,7 +7,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 
-from .metrics import _ride_tss, _accumulate_tiz
+from .metrics import _ride_tss, _accumulate_tiz, _ftp_asof
 
 _PR_WINDOWS = [("300", "5-min"), ("1200", "20-min")]
 
@@ -56,9 +56,12 @@ def ride_card(s, ftp, pr):
 
 def build_month(summaries, daily_actual, plan, ftp, year, month):
     """daily_actual: {date: {'ctl':, 'tss_sum':}} (authoritative actuals). plan: the generated plan
-    (or None). Returns calendar weeks (Mon-start) covering `year`-`month`, each with day cards +
-    weekly TSS/CTL actual-vs-plan."""
+    (or None). `ftp` may be a single float OR a dated history (list of {date, ftp}) — each ride is
+    scored with the FTP in effect on its date. Returns calendar weeks (Mon-start) covering
+    `year`-`month`, each with day cards + weekly TSS/CTL actual-vs-plan."""
     rides = [s for s in summaries if s.get("np")]
+    hist = sorted(ftp, key=lambda e: e["date"]) if isinstance(ftp, list) else None
+    ftp_for = (lambda d: _ftp_asof(hist, d, 200)) if hist else (lambda d: ftp or 200)
     pr = _pr_map(rides)
     by_date = {}
     for s in rides:
@@ -71,7 +74,7 @@ def build_month(summaries, daily_actual, plan, ftp, year, month):
         days = []
         for d in week:
             iso = d.isoformat()
-            cards = [ride_card(s, ftp, pr) for s in by_date.get(iso, [])]
+            cards = [ride_card(s, ftp_for(iso), pr) for s in by_date.get(iso, [])]
             tiz = [0, 0, 0, 0, 0, 0]
             for c in cards:
                 for i in range(6):

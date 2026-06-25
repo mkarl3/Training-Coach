@@ -38,8 +38,10 @@ def _config_ftp() -> float | None:
         return None
 
 
-def build_db(summaries: list[dict], out_path: str = DEFAULT_OUT, load_ftp: float | None = None) -> dict:
-    if load_ftp is None:
+def build_db(summaries: list[dict], out_path: str = DEFAULT_OUT, load_ftp=None) -> dict:
+    # load_ftp: a dated FTP history (list of {date, ftp}) for time-varying TSS, a single float, or
+    # None. None or an EMPTY history → fall back to the single config FTP (never hot CP).
+    if load_ftp is None or (isinstance(load_ftp, list) and not load_ftp):
         load_ftp = _config_ftp()
     daily = build_daily(summaries, load_ftp=load_ftp)
     workouts = build_workouts(summaries, load_ftp=load_ftp)

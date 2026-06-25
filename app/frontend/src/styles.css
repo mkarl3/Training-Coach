@@ -178,6 +178,30 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-i
 .modal-foot .ghost { background: transparent; color: var(--cream); box-shadow: inset 0 0 0 2px var(--cream); }
 .modal-foot button:disabled { opacity: 0.5; cursor: default; }
 .modal-body.err { color: var(--red); }
+/* FTP history editor (Profile) */
+.ftp-list { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 10px; }
+.ftp-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; background: var(--panel-3); border-left: 3px solid var(--jacket); }
+.ftp-date { font-family: var(--data); font-size: 12.5px; color: var(--cream); min-width: 92px; }
+.ftp-val { font-family: var(--data); font-weight: 600; font-size: 13px; color: var(--gold); }
+.ftp-src { font-family: var(--data); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; color: var(--ink-2); background: var(--panel-2); }
+.ftp-src.strava { color: #0b0b14; background: #fc5200; }
+.ftp-src.seed { color: var(--ink-3); }
+.ftp-row .del { margin-left: auto; background: none; border: none; color: var(--ink-3); font-size: 16px; cursor: pointer; line-height: 1; }
+.ftp-row .del:hover { color: var(--red); }
+.ftp-add { display: flex; gap: 8px; align-items: center; }
+.ftp-add input[type="date"], .ftp-add input[type="number"] { font-family: var(--ui); font-size: 13px; padding: 7px 9px; background: var(--panel-3); border: 1px solid var(--line); color: var(--cream); }
+.ftp-add input[type="number"] { width: 90px; }
+.ftp-add button { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.04em; border: 0; cursor: pointer; background: var(--gold); color: #0b0b14; padding: 8px 14px; }
+.ftp-add button:disabled { opacity: 0.5; cursor: default; }
+.hint.err { color: var(--red); }
+/* Strava new-FTP notice banner (App) */
+.ftp-notice { display: flex; align-items: center; gap: 14px; margin: 10px 22px 0; padding: 10px 14px; background: rgba(247,213,29,0.10); border-left: 3px solid var(--gold); }
+.ftp-notice-txt { font-size: 13px; color: var(--cream); flex: 1; line-height: 1.45; }
+.ftp-notice-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.ftp-notice-actions .confirm { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.04em; border: 0; cursor: pointer; background: var(--gold); color: #0b0b14; padding: 7px 13px; box-shadow: 3px 3px 0 #00000088; }
+.ftp-notice-actions .ghost { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 11.5px; letter-spacing: 0.04em; background: transparent; color: var(--cream); box-shadow: inset 0 0 0 2px var(--cream); border: 0; cursor: pointer; padding: 7px 13px; }
+.ftp-notice-actions .notice-x { background: none; border: 0; color: var(--ink-3); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
+.ftp-notice-actions .notice-x:hover { color: var(--red); }
 
 /* ============================ COACH — bottom Wattson bar + drawer ============================ */
 .coachbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: flex; align-items: stretch;

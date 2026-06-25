@@ -84,6 +84,32 @@ def _ride_tss(ride, ftp):
     return (ride["duration_s"] / 3600) * if_ ** 2 * 100, if_
 
 
+def _ftp_asof(hist, d, fallback):
+    """The set FTP effective on date `d`: the latest entry with date <= d; if d precedes all
+    entries, the earliest entry (back-fill); `fallback` when the history is empty."""
+    val = None
+    for e in hist:                                    # hist sorted ascending by date
+        if e["date"] <= d:
+            val = e["ftp"]
+        else:
+            break
+    if val is None and hist:
+        val = hist[0]["ftp"]
+    return val or fallback
+
+
+def _ftp_resolver(load_ftp, cp_at, fb):
+    """A date -> set-FTP function. `load_ftp` may be a dated history (list of {date, ftp}) for the
+    time-varying TSS, a single float (one FTP across all of history), or None/empty (self-consistent
+    CP fallback, carried over ride-less days)."""
+    if isinstance(load_ftp, list) and load_ftp:
+        hist = sorted(load_ftp, key=lambda e: e["date"])
+        return lambda d: _ftp_asof(hist, d, cp_at.get(d) or fb)
+    if isinstance(load_ftp, (int, float)) and load_ftp:
+        return lambda d: load_ftp
+    return lambda d: cp_at.get(d) or fb
+
+
 # Classic 6-zone power model as fractions of FTP (Coggan boundaries), mapped to tiz_pwr_z1..z6.
 _ZONE_FRAC = [0.0, 0.55, 0.75, 0.90, 1.05, 1.20, 1e9]
 
@@ -105,14 +131,18 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
     load_ftp = the athlete's THRESHOLD/set FTP used for TSS & IF (WKO5's "bikeFTP"). This is a
     DIFFERENT number from the modeled CP/mFTP used by the gates: TSS ∝ 1/FTP², so dividing by the
     lower modeled CP (~182) instead of the set threshold (~208) inflates every TSS ~30%. When
-    load_ftp is None we fall back to CP (self-consistent but hot). mftp_w stays = CP for the gates."""
+    load_ftp is None we fall back to CP (self-consistent but hot). mftp_w stays = CP for the gates.
+
+    load_ftp may also be a dated HISTORY (list of {date, ftp}); then each ride is scored with the
+    set FTP that was in effect on its date — see _ftp_resolver."""
     by, start, end, cp_at, wprime_at, pmax_at, fb = _series(summaries)
     if not by:
         return []
+    resolve = _ftp_resolver(load_ftp, cp_at, fb)
     ctl = atl = None
     rows = []
     for d in _drange(start, end):
-        ftp = load_ftp or cp_at.get(d) or fb
+        ftp = resolve(d)
         rides = by.get(d, [])
         tss = work = dur = 0.0
         tiz = [0, 0, 0, 0, 0, 0]
@@ -150,9 +180,10 @@ def build_workouts(summaries: list[dict], load_ftp: float | None = None) -> list
     with build_daily (load_ftp = the athlete's set threshold FTP for TSS/IF). EF / decoupling /
     VI / TIS / HR fields deferred → None."""
     by, start, end, cp_at, _wp, _pm, fb = _series(summaries)
+    resolve = _ftp_resolver(load_ftp, cp_at, fb)
     rows = []
     for d in sorted(by):
-        ftp = load_ftp or cp_at.get(d) or fb
+        ftp = resolve(d)
         for r in by[d]:
             tss, if_ = _ride_tss(r, ftp)
             mmp = r.get("mmp") or {}

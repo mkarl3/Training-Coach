@@ -33,6 +33,7 @@ const KIND_LABEL = {
   hard_time_loss: "Time off",
   hard_capacity_up: "Extra availability",
   hard_capacity_change: "Keep it easy",
+  phase_hold: "Hold this block",
 };
 
 function pmcBit(label, p) {
@@ -255,9 +256,12 @@ export default function Coach({ meta, onPlanChanged, onClose, seedMessage }) {
                   {(!st || st === "applying" || st === "error") && (
                     <div className="proposal-actions">
                       <button className="confirm" onClick={() => confirm(p)} disabled={st === "applying"}>
-                        {st === "applying" ? "Applying…" : "Confirm & recompute"}
+                        {st === "applying" ? "Applying…"
+                          : p.kind === "phase_hold" ? "Confirm hold" : "Confirm & recompute"}
                       </button>
-                      <button className="ghost" onClick={() => dismiss(p)}>Dismiss</button>
+                      <button className="ghost" onClick={() => dismiss(p)}>
+                        {p.kind === "phase_hold" ? "Not now" : "Dismiss"}
+                      </button>
                       {st === "error" && <span className="miss">couldn't apply — try again</span>}
                     </div>
                   )}

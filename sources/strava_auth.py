@@ -21,7 +21,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "strava_config.txt")
 AUTH_URL = "https://www.strava.com/oauth/authorize"
 TOKEN_URL = "https://www.strava.com/oauth/token"
 REDIRECT_URI = "http://localhost/exchange_token"      # any localhost URI; we just read the code back
-SCOPE = "activity:read_all"
+SCOPE = "activity:read_all,profile:read_all"   # profile:read_all → read the athlete's current FTP
 
 
 def _read_config() -> dict:

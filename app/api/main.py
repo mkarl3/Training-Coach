@@ -9,6 +9,7 @@ import dataclasses
 import datetime
 import io
 import os
+import re
 import sqlite3
 import sys
 
@@ -23,6 +24,7 @@ for p in ("slice4", "slice3", "slice2", "slice1", "slice0"):
 sys.path.insert(0, ROOT)                                  # for the `sources` package (Strava ingest)
 
 from wko_metrics import metrics, detectors, profile, AthleteProfile, DEFAULT_PROFILE  # noqa: E402
+from wko_metrics import ftp_history                   # noqa: E402  (dated load-FTP history)
 from watchman import (select, build_trend, DEFAULT_SELECTION, apply_life_events, load_life_events,  # noqa: E402
                       add_life_event, list_life_events, delete_life_event,
                       LIFE_EVENT_CATEGORIES, LIFE_EVENT_EFFECTS)
@@ -153,7 +155,19 @@ def _load_training_data():
     )
     _S.setdefault("pending", {})       # ephemeral diary proposals awaiting confirmation
     _S.setdefault("pending_seq", 0)
+    _ensure_ftp_seed()                 # seed the dated load-FTP history on first run
     _refresh_advisories()              # seed recurring-theme context for the coach
+
+
+def _ensure_ftp_seed():
+    """First run: if there's no load-FTP history yet, seed one entry = the static config FTP,
+    effective from the data start, so existing TSS is unchanged until the athlete adds dated values."""
+    conn = _S.get("conn")
+    if conn is None or _S.get("date_min") is None or ftp_history.list_entries(conn):
+        return
+    from sources import build_db
+    ftp_history.add_entry(conn, _S["date_min"], build_db._config_ftp() or 200,
+                          source="seed", created_at=_S["date_min"])
 
 
 def _refresh_plan():
@@ -477,6 +491,38 @@ def _propose(text):
     return proposals, questions
 
 
+# a phase-hold becomes relevant when the athlete brings up advancing / holding / being ready.
+_PROGRESS_INTENT = re.compile(
+    r"\b(advanc\w*|ready|move (?:on|up|to)|next (?:block|phase)|progress\w*|graduat\w*|"
+    r"hold\w*|not ready|stay (?:in|on|put)|extend\w*)\b", re.I)
+
+
+def _hold_proposal(text):
+    """When the athlete is talking about advancing/holding AND the live gate verdict is a HOLD,
+    surface a tappable hold proposal: extend the current block by a week (the cost is stolen from a
+    later block — the honest tradeoff). Routed through the SAME pending/confirm machinery as the
+    diary proposals; applies nothing. Returns the proposal dict or None."""
+    s, plan = _S.get("season"), _S.get("plan")
+    if not s or not plan or "error" in plan or not _PROGRESS_INTENT.search(text or ""):
+        return None
+    prog = plan_progression.assess_progression(_S["m"], plan, _S["as_of"], _S.get("profile"))
+    if prog.get("verdict") not in ("HOLD", "PROCEED_WITH_DEBT"):
+        return None
+    block = prog.get("block")
+    if not block or block not in {w["block"] for w in plan["weeks"]}:
+        return None
+    edit = {"target": "block_hold", "block": block, "weeks": 1}
+    cand = _candidate_plan(edit)
+    if "error" in cand:
+        return None
+    _S["pending_seq"] += 1
+    pid = _S["pending_seq"]
+    summary = f"Hold {block} +1 wk"
+    _S["pending"][pid] = {"kind": "phase_hold", "summary": summary, "edit": edit}
+    return {"id": pid, "kind": "phase_hold", "summary": summary, "edit": edit,
+            "diff": plan_gen.diff_plans(plan, cand)}
+
+
 @app.post("/api/coach/message")
 def message(body: MessageIn):
     _require_loaded()
@@ -485,6 +531,11 @@ def message(body: MessageIn):
     # 1. Diary-driven adjustment is PROPOSE-ONLY: classify the message and, for hard constraints
     #    or opportunities, prepare a recompute the athlete must confirm (nothing applied here).
     proposals, questions = _propose(body.text)
+    # 1b. No diary change but the athlete's on about advancing/holding + the gate says HOLD → offer it.
+    if not proposals:
+        hp = _hold_proposal(body.text)
+        if hp:
+            proposals = [hp]
     # 2. Only when the diary found no plan-relevant change do we fall back to the Slice 4 direct
     #    commands ("move my race", "I'm down to 5 h/wk") which apply immediately + explain.
     edit_note = None if proposals else _try_season_edit(body.text, now)
@@ -605,6 +656,10 @@ def confirm_adjustment(body: ConfirmIn):
         rid = plan_store.add_unavailable(_S["conn"], s["id"], e["start_date"], e["end_date"], now,
                                          reason=e["reason"])
         undo = {"table": "unavailable_period", "id": rid}
+    elif e["target"] == "block_hold":                 # in-chat phase-hold (mirror /api/progression/hold)
+        rid = plan_store.add_modifier(_S["conn"], s["id"], "block_hold", s["start_date"],
+                                      s["start_date"], now, hours=e["weeks"], reason=e["block"])
+        undo = {"table": "plan_modifier", "id": rid}
     else:
         kind = e["target"]                            # availability | intensity_cap | readiness
         val = e.get("hours") if kind == "availability" else (e.get("factor") if kind == "readiness" else None)
@@ -879,32 +934,112 @@ def _swap_db(staging, dst):
         pass
 
 
+def _rebuild_db_from_cache() -> bool:
+    """Recompute the daily/workout DB from the CACHED Strava summaries using the current dated
+    FTP history, then hot-swap it in. No Strava call. Returns False (no rebuild) when there's no
+    cached power data yet — e.g. still on the imported WKO5 DB, before any Strava pull."""
+    import shutil
+    from sources import pull_history, build_db
+    summ = list(pull_history.load_cache().values())
+    if not any(s.get("np") for s in summ):
+        return False
+    hist = ftp_history.history(_S["conn"]) if _S.get("conn") else None
+    staging = WKO_DB + ".strava"
+    build_db.build_db(summ, out_path=staging, load_ftp=hist)   # time-varying TSS from the history
+    bak = WKO_DB + ".wko5bak"
+    if os.path.exists(WKO_DB) and not os.path.exists(bak):
+        shutil.copy2(WKO_DB, bak)                          # one-time WKO5 backup
+    _swap_db(staging, WKO_DB)                              # in-place (OneDrive locks rename, not writes)
+    _load_training_data()
+    return True
+
+
 @app.post("/api/strava/pull")
 def strava_pull(full: bool = Query(False)):
-    """Pull rides from Strava (incremental by default; full=True walks all history), rebuild the
-    Strava-sourced DB, and hot-swap it in — same atomic + reload pattern as /api/upload. The first
-    swap backs up the existing (WKO5) DB to wko.db.wko5bak so it's recoverable."""
-    import shutil
+    """Pull rides from Strava (incremental by default; full=True walks all history), capture the
+    athlete's current set FTP as a dated history entry if it changed, rebuild the Strava-sourced DB
+    (time-varying TSS), and hot-swap it in — same atomic + reload pattern as /api/upload."""
     import traceback
-    from sources import pull_history, build_db
+    from sources import pull_history, strava_client
     try:
         res = pull_history.pull(full=full)
-        summ = list(pull_history.load_cache().values())
-        if not any(s.get("np") for s in summ):
+        # Strava's current FTP is PROPOSED, not auto-applied — the athlete accepts/edits/dismisses.
+        proposal = (ftp_history.propose_strava_ftp(_S["conn"], strava_client.get_athlete_ftp(),
+                                                   datetime.date.today().isoformat())
+                    if _S.get("conn") else None)
+        if not _rebuild_db_from_cache():
             raise HTTPException(400, "No power rides available from Strava yet — nothing to build.")
-        staging = WKO_DB + ".strava"
-        build_db.build_db(summ, out_path=staging)
-        bak = WKO_DB + ".wko5bak"
-        if os.path.exists(WKO_DB) and not os.path.exists(bak):
-            shutil.copy2(WKO_DB, bak)                      # one-time WKO5 backup
-        _swap_db(staging, WKO_DB)                         # in-place (OneDrive locks rename, not writes)
-        _load_training_data()
-        return {"ok": True, "data_through": _S["as_of"], "board_status": _S["status"], **res}
+        return {"ok": True, "data_through": _S["as_of"], "board_status": _S["status"],
+                "ftp_proposal": proposal, **res}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(500, f"Strava pull failed at: {type(e).__name__}: {e}\n"
                                  + traceback.format_exc()[-800:])
+
+
+class FtpEntryIn(BaseModel):
+    effective_date: str
+    ftp: float
+
+
+@app.get("/api/ftp-history")
+def get_ftp_history():
+    """The athlete's dated load-FTP history (the set/threshold FTP used for TSS), oldest first, plus
+    any open Strava-FTP proposal awaiting a decision."""
+    _require_loaded()
+    return {"entries": ftp_history.list_entries(_S["conn"]),
+            "current": ftp_history.latest_ftp(_S["conn"]),
+            "pending": ftp_history.get_pending(_S["conn"])}
+
+
+@app.post("/api/ftp-history/accept-pending")
+def accept_pending_ftp():
+    """Accept the proposed Strava FTP (effective the date Strava reported it) and recompute TSS."""
+    _require_loaded()
+    accepted = ftp_history.accept_pending(_S["conn"])
+    if not accepted:
+        raise HTTPException(404, "no pending FTP to accept")
+    applied = _rebuild_db_from_cache()
+    return {"ok": True, "applied": applied, "accepted": accepted,
+            "entries": ftp_history.list_entries(_S["conn"])}
+
+
+@app.post("/api/ftp-history/dismiss-pending")
+def dismiss_pending_ftp():
+    """Dismiss the proposed Strava FTP — hides the notice and remembers the value so it won't prompt
+    again unless Strava reports a different one. Applies nothing."""
+    _require_loaded()
+    ftp_history.dismiss_pending(_S["conn"])
+    return {"ok": True}
+
+
+@app.post("/api/ftp-history")
+def add_ftp_entry(body: FtpEntryIn):
+    """Add (or replace the same-day) dated FTP entry, then recompute TSS across history from the
+    Strava cache. `applied` is False if there's no cache yet (it'll take effect on the next pull)."""
+    _require_loaded()
+    if not (0 < body.ftp <= 600):
+        raise HTTPException(400, "FTP must be between 1 and 600 W")
+    try:
+        datetime.date.fromisoformat(body.effective_date)
+    except ValueError:
+        raise HTTPException(400, "effective_date must be ISO yyyy-mm-dd")
+    ftp_history.add_entry(_S["conn"], body.effective_date, body.ftp, source="manual",
+                          created_at=datetime.datetime.now().replace(microsecond=0).isoformat())
+    ftp_history.clear_pending_if_value(_S["conn"], body.ftp)   # Edit path: hand-added the proposed FTP
+    applied = _rebuild_db_from_cache()
+    return {"ok": True, "applied": applied, "entries": ftp_history.list_entries(_S["conn"]),
+            "data_through": _S.get("as_of")}
+
+
+@app.delete("/api/ftp-history/{entry_id}")
+def delete_ftp_entry(entry_id: int):
+    _require_loaded()
+    if ftp_history.delete_entry(_S["conn"], entry_id) == 0:
+        raise HTTPException(404, "no such FTP entry")
+    applied = _rebuild_db_from_cache()
+    return {"ok": True, "applied": applied, "entries": ftp_history.list_entries(_S["conn"])}
 
 
 @app.get("/api/log")
@@ -916,7 +1051,7 @@ def training_log(year: int = Query(None), month: int = Query(None)):
     from sources import pull_history, build_db, log as wlog
     ao = datetime.date.fromisoformat(_S["as_of"])
     year, month = year or ao.year, month or ao.month
-    ftp = build_db._config_ftp() or 200
+    ftp = ftp_history.history(_S["conn"]) or build_db._config_ftp() or 200   # time-varying per ride
     summaries = list(pull_history.load_cache().values())
     daily_actual = {}
     m = _S.get("m")
