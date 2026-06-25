@@ -461,6 +461,32 @@ textarea:focus { outline: 2px solid var(--jacket); }
 @media (max-width: 1024px) { .trend-grid { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .appbar { flex-wrap: wrap; } .coach-drawer { height: 86vh; } .coachbar-txt p { white-space: normal; } }
 
+/* ===== Consistency Gauge (four-heart vitality readout) ===== */
+.cg { padding: 12px 16px; }
+.cg.flag { animation: cg-frame 0.9s steps(2) infinite; }
+@keyframes cg-frame { 50% { box-shadow:
+    0 -3px 0 var(--red), 0 3px 0 var(--red), -3px 0 0 var(--red), 3px 0 0 var(--red),
+    0 -6px 0 #07070e, 0 6px 0 #07070e, -6px 0 0 #07070e, 6px 0 0 #07070e, 8px 9px 0 #00000055; } }
+.cg-row { display: flex; align-items: center; gap: 16px; }
+.cg-port { width: 54px; flex-shrink: 0; }
+.cg-port svg { width: 100%; }
+.cg-mid { flex: 1; }
+.cg-label { font-family: var(--data); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 5px; }
+.cg-hearts { display: flex; gap: 7px; }
+.cg-heart.empty { color: #243056; }
+.cg-heart.red { color: var(--red); }
+.cg-heart.yellow { color: var(--gold); }
+.cg-heart.flash { animation: cg-heart-strobe 0.7s steps(2) infinite; }
+@keyframes cg-heart-strobe { 0%, 49% { color: var(--red); } 50%, 100% { color: var(--cream); } }
+.cg-streak { text-align: center; min-width: 64px; }
+.cg-streak-n { font-family: var(--pix); font-size: 22px; color: var(--green); }
+.cg-streak-l { font-family: var(--data); font-size: 9.5px; color: var(--ink-3); text-transform: uppercase; }
+.cg-alert { margin-top: 12px; padding: 10px 12px; background: rgba(232,68,68,0.1); border-left: 3px solid var(--red); display: flex; flex-direction: column; gap: 6px; }
+.cg-alert-tag { font-size: 9px; color: var(--red); letter-spacing: 0.06em; }
+.cg-alert-line { font-size: 13px; color: var(--cream); line-height: 1.5; }
+.cg-alert-line b { font-family: var(--data); }
+.cg-alert-cta { align-self: flex-start; font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; background: var(--red); color: #fff; border: 0; padding: 7px 12px; cursor: pointer; box-shadow: 2px 2px 0 #00000088; }
+
 /* ===== Training Log (Strava daily grid) ===== */
 .cal-viewtoggle { display: flex; gap: 6px; margin: 4px 6px 12px; }
 .cal-viewtoggle button { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 0.05em;

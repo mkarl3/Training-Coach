@@ -22,3 +22,13 @@ class SelectionConfig:
 
 
 DEFAULT_SELECTION = SelectionConfig()
+
+# --- Consistency Gauge (handoff brief §6) --------------------------------------------------- #
+# The above-the-line buffer's one new deterministic quantity: a trailing 7-day WEEK is a MISS
+# (drops a heart) when the athlete rode FEWER than this many days that week. Ungated (no CTL-p80
+# build gate — that belongs to gap_unravel), plan-independent (no Slice-4 dependency), behavioral
+# ("show up"); derived from m.has_ride only, no new metric.
+# SIGNED OFF 2026-06-23 as a static 4 (ride 4+ days/week = clean). Backlog: once weekly workout
+# PLANNING exists, this becomes the count of rides the plan SCHEDULES that week (plan-relative — a
+# deliberate future relaxation of today's plan-independence). Not there yet.
+CONSISTENCY_CLEAN_MIN_RIDE_DAYS = 4
