@@ -24,26 +24,37 @@ function GateVisual({ g }) {
   if (!g || g.kind === "none") return null;
 
   if (g.kind === "weeks") {
-    const cells = Array.from({ length: Math.max(1, g.total) }, (_, i) => i + 1);
+    const wks = g.weeks && g.weeks.length ? g.weeks : null;
+    const slots = g.min_ride_days || 4;
+    const cellState = (w) => (w.complete ? "complete" : w.status === "now" ? "current"
+      : w.status === "done" ? "missed" : "future");
     return (
       <div className="mc-tile gate" style={{ borderTopColor: "var(--gold)" }}>
-        <div className="gate-top"><span className="mc-k" style={{ color: "var(--gold)" }}>Progress → {g.next_block}</span>
-          <span className="mc-cap">build {g.total} steady weeks</span></div>
-        <div className="gate-weeks">
-          <div className="gw-cells">
-            {cells.map((i) => (
-              <div key={i} className={"gw-cell" + (i < g.elapsed ? " done" : i === g.elapsed ? " now" : "")}>
-                <span>WK {i}</span>{i === g.elapsed && <em>now</em>}
+        <div className="gate-top">
+          <span className="mc-k" style={{ color: "var(--gold)" }}>Progress → {g.next_block}</span>
+          <span className="mc-cap">ride {slots}+ days/wk = steady</span>
+        </div>
+        {wks ? (
+          <div className="gw-weeks">
+            {wks.map((w) => (
+              <div key={w.week} className={"gw-wk " + cellState(w)}>
+                <div className="gw-wk-lab">WK {w.week}{w.status === "now" && <em>now</em>}</div>
+                <div className="gw-slots">
+                  {Array.from({ length: slots }).map((_, s) => (
+                    <i key={s} className={"gw-slot" + (s < w.ride_days ? " on" : "")} />
+                  ))}
+                </div>
               </div>
             ))}
           </div>
-          <div className="gw-flag"><i className="ti ti-flag" aria-hidden="true" /><span>{g.next_block}</span></div>
-        </div>
+        ) : (
+          <div className="gw-fallback mc-cap">{g.elapsed} of {g.total} weeks</div>
+        )}
         <div className="gate-foot">
           <span style={{ color: g.ramp_ok ? "var(--green)" : "var(--ramp-lose)" }}>
             <i className={"ti " + (g.ramp_ok ? "ti-trending-up" : "ti-trending-down")} aria-hidden="true" />{" "}
-            ramp {g.ramp >= 0 ? "+" : ""}{g.ramp}/28d</span>
-          <span className="mc-cap">{Math.min(g.elapsed, g.total)} of {g.total} weeks</span>
+            fitness {g.ramp >= 0 ? "+" : ""}{g.ramp}/28d</span>
+          <span className="mc-cap">→ {g.next_block}</span>
         </div>
       </div>
     );

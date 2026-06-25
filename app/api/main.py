@@ -236,6 +236,15 @@ def watchman(as_of: str = Query(...), window: int = Query(120, ge=14, le=400)):
     return select(_S["findings"], as_of, _S["m"], scfg)
 
 
+@app.get("/api/consistency")
+def consistency(as_of: str = Query(None)):
+    """Consistency Gauge reading (handoff brief): four-heart adherence buffer (gauge-owned) +
+    the gap_unravel flag (detector-owned). Deterministic; the React component renders only."""
+    _require_loaded()
+    from watchman import consistency_gauge
+    return consistency_gauge(_S["findings"], as_of or _S["as_of"], _S["m"])
+
+
 @app.get("/api/trend")
 def trend(as_of: str = Query(None)):
     """Long-range fitness-trend payload for the integrated dashboard: weekly CTL+TSS series, the

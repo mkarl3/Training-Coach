@@ -9,6 +9,8 @@ Validated against the WKO5/CTS knowledgebase. Every non-sourced threshold is mar
 """
 import datetime as dt
 
+from wko_metrics.consistency import consecutive_miss_weeks, CONSISTENCY_CLEAN_MIN_RIDE_DAYS
+
 # --- TUNABLE v1 defaults (NOT sourced — see slice5_spec.md §9) ---
 FU_READY_PCT = 81.0          # SOURCED: fractional-utilization 81-85% band is the base->build gate
 FU_STAY_PCT = 80.0           # SOURCED-ish: below ~80-81% keep doing extensive base
@@ -93,6 +95,18 @@ def assess_progression(m, plan, as_of, profile=None):
     chg = m.ctl_change(as_of)                       # building?
     stale = m.band_staleness(as_of)
 
+    # per-week ride-day detail for the current block (drives the gate visual's ride slots). Counted
+    # from actual rides; a week is "complete" at CONSISTENCY_CLEAN_MIN_RIDE_DAYS ride days. Guarded
+    # for date-less stub plans (unit tests) → empty.
+    block_weeks = []
+    if all(w.get("week_start") and w.get("week_end") for w in cur["weeks"]):
+        for w in cur["weeks"]:
+            rd = int(m.has_ride[(m.has_ride.index >= w["week_start"])
+                                & (m.has_ride.index <= w["week_end"])].sum())
+            st = "done" if w["status"] == "elapsed" else "now" if w["status"] == "current" else "future"
+            block_weeks.append({"week": w["week"], "ride_days": rd, "status": st,
+                                "complete": rd >= CONSISTENCY_CLEAN_MIN_RIDE_DAYS})
+
     gate, verdict, test, branches = _gate(m, as_of, kind, block, next_block, stale, chg, compliance)
 
     # never advance early when peak-anchored: a READY gate before min_weeks holds the schedule
@@ -109,6 +123,7 @@ def assess_progression(m, plan, as_of, profile=None):
         "started": not future, "focus": cur_week.get("focus"),
         "watching": cur_week.get("target_metric"), "advance_when": cur_week.get("advance_when"),
         "field_test_week": bool(cur_week.get("field_test")),
+        "block_weeks": block_weeks, "min_ride_days": CONSISTENCY_CLEAN_MIN_RIDE_DAYS,
         "compliance": compliance, "ctl_change_28d": chg,
         "gate": gate, "verdict": verdict, "this_week_test": test, "branches": branches,
         "headline": _headline(verdict, block, next_block, gate, week_in_block, nominal, future),
@@ -146,17 +161,24 @@ def _gate(m, as_of, kind, block, next_block, stale, chg, compliance):
             {"outcome": "still climbing", "action": "hold — you're still responding", "calendar_cost": "minor"}]
 
     if kind == "prep_to_base":
+        # Prep is about ESTABLISHING THE RHYTHM — consistency = ride FREQUENCY (show up N days/wk),
+        # NOT TSS-compliance (which one hero day can fake — "no hero days"). Plan-independent, so it
+        # reads from week 1 with no plan-adherence data. Same definition as the Consistency Gauge.
+        miss = consecutive_miss_weeks(m.has_ride, as_of, CONSISTENCY_CLEAN_MIN_RIDE_DAYS)
+        consistent = miss == 0
         building = (chg or 0) > 0
-        g = {"name": "consistency + building", "metric": "CTL ramp + compliance",
-             "ctl_change_28d": chg, "compliance": compliance}
-        if compliance is not None and compliance < COMPLIANCE_OK:
-            return g, "HOLD", "string together consistent weeks before adding base volume", [
-                {"outcome": "compliance recovers", "action": "advance to Base", "calendar_cost": "none"},
-                {"outcome": "still inconsistent", "action": "hold Prep", "calendar_cost": "delays base"}]
-        if building or compliance is None:
-            return g, "ADVANCE", "hold the rhythm; fitness is turning up", [
-                {"outcome": "ramp stays positive", "action": "advance to Base", "calendar_cost": "none"}]
-        return g, "ON_TRACK", "keep the consistency going", []
+        g = {"name": "consistency", "metric": f"ride {CONSISTENCY_CLEAN_MIN_RIDE_DAYS}+ days/wk",
+             "min_ride_days": CONSISTENCY_CLEAN_MIN_RIDE_DAYS, "recent_miss_weeks": miss,
+             "consistent": consistent, "ctl_change_28d": chg}
+        if not consistent:
+            return g, "HOLD", "show up and string together steady weeks before adding base volume", [
+                {"outcome": f"you ride {CONSISTENCY_CLEAN_MIN_RIDE_DAYS}+ days/wk consistently",
+                 "action": "advance to Base", "calendar_cost": "none"},
+                {"outcome": "weeks stay spotty", "action": "hold Prep", "calendar_cost": "delays base"}]
+        if building:
+            return g, "ADVANCE", "the rhythm's there and fitness is turning up", [
+                {"outcome": "rhythm holds", "action": "advance to Base", "calendar_cost": "none"}]
+        return g, "ON_TRACK", "keep showing up — fitness follows the rhythm", []
 
     if kind == "build_to_peak":
         days = stale.get("medium")

@@ -22,3 +22,8 @@ class SelectionConfig:
 
 
 DEFAULT_SELECTION = SelectionConfig()
+
+# --- Consistency clean/miss threshold ------------------------------------------------------- #
+# Canonical home is wko_metrics.consistency (Slice 1) so the Prep progression gate shares the exact
+# same number as the Consistency Gauge. Re-exported here for back-compat with the gauge's brief.
+from wko_metrics.consistency import CONSISTENCY_CLEAN_MIN_RIDE_DAYS  # noqa: E402,F401

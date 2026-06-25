@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Wattson, { VB_HEAD } from "./Wattson";
 import MergedCard from "./MergedCard.jsx";
+import ConsistencyGauge from "./ConsistencyGauge.jsx";
 
 // Watt Smith fitness-trend dashboard. ONE instrument: a single ramp-coloured CTL line with
 // weekly-TSS bars, insights pinned as markers on the timeline, and Coach Wattson reading the
@@ -246,6 +247,7 @@ export default function Watchman({ meta, onSeeWeek, onCheckIn, onPlanChange, onR
   return (
     <>
     <MergedCard meta={meta} onSeeWeek={onSeeWeek} onReply={onReply} />
+    <ConsistencyGauge meta={meta} onReply={onReply} />
     <div className="panel trend-panel">
       <div className="trend-head">
         <h2>Fitness trend</h2>
