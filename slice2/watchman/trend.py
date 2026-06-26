@@ -372,6 +372,8 @@ def _hero(m, as_of, plan, status):
         headline, mood = "Holding steady — fitness banked and maintained.", "calm"
     if status == "alert":
         mood = "alarmed"
+    elif status == "watch" and mood == "approving":
+        mood = "calm"          # something's on the watch list — read steady, don't beam
 
     fdir = "rising" if chg > 1 else "sliding" if chg < -1 else "holding"
     form_lab = "fresh" if tsb_now > 5 else "run down" if tsb_now < -15 else "neutral"

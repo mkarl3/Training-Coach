@@ -201,9 +201,11 @@ def select(findings, as_of, m, scfg=DEFAULT_SELECTION, dcfg=DETECTORS):
                          "data_flags": f["data_flags"]}
         gauge_out = {"mode_id": "fragile_ftp", "legs": legs}
 
-    watch_summary = [{"mode_id": mode, "count": len(fs),
-                      "latest": max(f["window_end"] for f in fs)}
-                     for mode, fs in sorted(watch_rollup.items())]
+    watch_summary = []
+    for mode, fs in sorted(watch_rollup.items()):
+        latest = max(fs, key=lambda f: f["window_end"])
+        watch_summary.append({"mode_id": mode, "count": len(fs),
+                              "latest": latest["window_end"], "evidence": latest["evidence"]})
 
     # Trend-first status: an ACUTE tripwire makes the board red; a standing trend or rolled-up
     # watch is amber CONTEXT; otherwise green (a valid, common state). A chronic condition never

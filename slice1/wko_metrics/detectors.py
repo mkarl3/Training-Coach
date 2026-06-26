@@ -339,9 +339,19 @@ def detect_injury_spike(m, dcfg=DETECTORS):
         ch = float(chronic.iloc[i])
         if ac < m.profile.acwr_min_acute_load or ch < m.profile.acwr_min_chronic_load:  # absolute-load gates
             continue
-        if cur >= dcfg.acwr_confirmed and armed_conf:
+        # Low-base cap: with a small chronic load the acute window is dominated by one ride, so the
+        # ratio over-reads as a spike. Hold a would-be CONFIRMED at WATCH until the base is built.
+        low_base = ch < m.profile.acwr_confirmed_min_chronic_load
+        hit_conf = cur >= dcfg.acwr_confirmed
+        if hit_conf and not low_base and armed_conf:
             thr, sev = dcfg.acwr_confirmed, "confirmed"
             armed_conf = armed_watch = False
+        elif hit_conf and low_base and armed_conf:
+            # Base too low for a red alert, but this IS a real escalation across the confirmed line.
+            # Register it (as watch) on THIS day, on the confirmed arming, so the finding dates to
+            # the actual peak ride — not just the leading-edge watch crossing the hysteresis caught.
+            thr, sev = dcfg.acwr_watch, "watch"
+            armed_conf = False
         elif cur >= dcfg.acwr_watch and armed_watch:
             thr, sev = dcfg.acwr_watch, "watch"
             armed_watch = False
@@ -351,6 +361,8 @@ def detect_injury_spike(m, dcfg=DETECTORS):
             "acwr_crossing": _t(True, _round(cur), thr),
             "acute_load_gate": _t(True, _round(ac), m.profile.acwr_min_acute_load),
         }
+        if low_base and hit_conf:                     # record why a red-tier spike was held at watch
+            disc["low_base_cap"] = _t(True, _round(ch), m.profile.acwr_confirmed_min_chronic_load)
         ev = {"acwr": _round(cur), "acute_ewma": _round(ac)}
         out.append(b.make("injury_spike", "early_warning", sev, idx[i], idx[i], ev, dict(disc)))
         # retrospective: consequent stop within 1-3 wks (lookahead)

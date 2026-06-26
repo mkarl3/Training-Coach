@@ -138,7 +138,11 @@ export default function MergedCard({ meta, onSeeWeek, onReply }) {
             {c.verdict_label && <span className={"mc-verdict " + (c.verdict || "").toLowerCase()}>{c.verdict_label}</span>}
           </div>
 
-          <p className="mc-narrative">{(c.narrative || []).join(" ")}</p>
+          {(c.prose ? c.prose.split(/\n\s*\n/) : [(c.narrative || []).join(" ")])
+            .filter((p) => p.trim())
+            .map((para, i) => (
+              <p key={i} className="mc-narrative">{para}</p>
+            ))}
 
           {fit && (
             <div className="mc-row">
