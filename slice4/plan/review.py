@@ -12,6 +12,8 @@ import datetime as dt
 
 import pandas as pd
 
+from wko_metrics.config import DETECTORS
+
 
 def _asof(series, d):
     v = series.asof(pd.Timestamp(d))
@@ -146,17 +148,92 @@ def _gate_visual(prog):
             "ramp": prog.get("ctl_change_28d"), "ramp_ok": (prog.get("ctl_change_28d") or 0) >= 0}
 
 
-def coach_card(hero, prog):
-    """Compose the merged dashboard card: Wattson's deterministic narrative (the hero read + this
-    week's directive + the phase gate, folded into one voice), the glanceable vitals, and a
-    gate-aware progress-visual spec. Pure — it arranges grounded numbers/strings, invents nothing
-    (THE ONE RULE), so the UI never has to synthesize coaching copy."""
+# --- watchman concern line (so an alarmed/amber Wattson actually SAYS what tripped) ---
+_MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _fmt_day(iso):
+    if not iso:
+        return "recently"
+    d = dt.date.fromisoformat(iso[:10])
+    return f"{_MON[d.month - 1]} {d.day}"
+
+
+# Confirmed (red) tripwire -> imperative: name the trigger, give the move.
+_ALERT_LINE = {
+    "injury_spike": lambda ev, when: (
+        f"Heads up — your training load spiked around {when} (ACWR {ev.get('acwr')}, acute load well "
+        f"over your recent base). Ride easy the next day or two and let it settle before adding more."),
+    "gap_unravel": lambda ev, when: (
+        f"You've been off the bike since {when} and fitness is starting to leak. Get a steady ride "
+        f"in now, before the base unravels."),
+    "monotony": lambda ev, when: (
+        f"Your training's gone one-note (monotony {ev.get('monotony')}). Break it up — one genuinely "
+        f"easy day and one harder, not all the same."),
+}
+# Watch (amber) -> softer "I'm watching X" context, still concrete. (evidence, when).
+_WATCH_LINE = {
+    "injury_spike": lambda ev, when: (
+        f"I'm watching the load spike on {when} — that effort ran your acute load to about "
+        f"{ev.get('acwr')}× your recent base. Not alarming at the fitness you're carrying, but "
+        f"don't stack another big day straight on top of it."),
+    "gap_unravel": lambda ev, when: (
+        f"I'm watching a gap in your riding around {when} — get back on this week and it's a non-issue."),
+    "under_load": lambda ev, when: (
+        "I'm watching your load — it's been sitting under your sustainable base; the plan pulls it back up."),
+    "monotony": lambda ev, when: (
+        "I'm watching your variety — the last stretch leans repetitive."),
+    "overtraining": lambda ev, when: (
+        "I'm watching your fatigue — form's been deep in the red while load keeps climbing."),
+}
+_ALERT_FALLBACK = "Heads up — something acute just tripped in your numbers. Ease off until it clears."
+
+
+def _concern_line(watch):
+    """One Wattson-voice line naming the active alert/watch, or None on a green board. Pure: it
+    reads the already-selected watchman result, computes nothing (THE ONE RULE)."""
+    if not watch:
+        return None
+    status = watch.get("status")
+    trips = watch.get("tripwires") or []
+    if status == "alert":
+        firm = [t for t in trips if not t.get("provisional")]
+        if firm:
+            t = firm[0]                                   # already priority-sorted in select()
+            f = _ALERT_LINE.get(t["mode_id"])
+            if f:
+                return f(t.get("evidence") or {}, _fmt_day(t.get("window_end")))
+        return _ALERT_FALLBACK
+    if status == "watch":
+        # highest-priority active concern across provisional trips, watch-rollup, and trend zones
+        cands = [(DETECTORS.priority.get(t["mode_id"], 99), t["mode_id"], t.get("window_end"),
+                  t.get("evidence") or {}) for t in trips]
+        cands += [(DETECTORS.priority.get(w["mode_id"], 99), w["mode_id"], w.get("latest"),
+                   w.get("evidence") or {}) for w in (watch.get("watch_rollup") or [])]
+        cands += [(a.get("priority", 99), a["mode_id"], a.get("zone_end"), a.get("evidence") or {})
+                  for a in (watch.get("trend_annotations") or [])]
+        if not cands:
+            return None
+        _, mode, when, ev = min(cands, key=lambda c: c[0])
+        f = _WATCH_LINE.get(mode)
+        return f(ev, _fmt_day(when)) if f else None
+    return None
+
+
+def coach_card(hero, prog, watch=None):
+    """Compose the merged dashboard card: Wattson's deterministic narrative (the active concern +
+    the hero read + this week's directive + the phase gate, folded into one voice), the glanceable
+    vitals, and a gate-aware progress-visual spec. Pure — it arranges grounded numbers/strings,
+    invents nothing (THE ONE RULE), so the UI never has to synthesize coaching copy. `watch` is the
+    Slice-2 selection so the narrative can lead with whatever tripped the board."""
     if not hero:
         return {"narrative": ["Load some training data and I'll read where you stand."],
                 "vitals": None, "gate_visual": {"kind": "none"}, "mood": "calm",
                 "status": "awaiting", "verdict": None}
     d = hero.get("directive") or {}
-    n = [hero["headline"]]
+    concern = _concern_line(watch)
+    n = ([concern] if concern else []) + [hero["headline"]]
+    now_count = len(n)            # paragraph 1 = the concern + the current-state read; plan follows
     ok = bool(prog and prog.get("state") == "ok")
 
     if ok:
@@ -218,6 +295,12 @@ def coach_card(hero, prog):
         gate_visual = {"kind": "none"}
         verdict_out = None
 
+    # Paragraph groups: the now-read (concern + where you stand) vs the plan (block/directive/gate).
+    # The polish layer turns each group into one tight paragraph; the UI renders them separately.
+    paragraphs = [" ".join(n[:now_count])]
+    if len(n) > now_count:
+        paragraphs.append(" ".join(n[now_count:]))
+
     return {
         "mood": hero["mood"], "status": hero["status"],
         "block": prog.get("block") if ok else None,
@@ -226,6 +309,7 @@ def coach_card(hero, prog):
         "week_in_block": prog.get("week_in_block") if ok else None,
         "weeks_in_block": prog.get("weeks_in_block") if ok else None,
         "narrative": n,
+        "narrative_paragraphs": paragraphs,
         "vitals": hero["vitals"],
         "this_week_tss": d.get("tss"),
         "gate_visual": gate_visual,

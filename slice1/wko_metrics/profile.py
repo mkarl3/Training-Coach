@@ -59,6 +59,11 @@ class AthleteProfile:
     # injury_spike absolute-load gates (scaled to this athlete's load)
     acwr_min_acute_load: float = 30.0
     acwr_min_chronic_load: float = 20.0
+    # A ratio spike only earns a CONFIRMED (red) alert once the chronic base is big enough that the
+    # 7-day acute window isn't dominated by a single ride; below this the spike is held at WATCH.
+    # At a low CTL the ACWR denominator is small and over-reads one hard day as a "spike" — a
+    # rebuild artefact, not an injury signal. Tuned so a genuine base, not a deep rebuild, fires red.
+    acwr_confirmed_min_chronic_load: float = 40.0
     # monotony
     monotony_band_frac: float = 0.6
     tiz_concentration_watch: float = 0.45
@@ -79,6 +84,7 @@ class AthleteProfile:
         "gap_confirmed_ctl_drop", "genuine_peak_margin", "underload_below_floor_frac",
         "underload_ramp_watch", "ramp_rate_cap", "ot_tsb_percentile", "fragile_gap_watch_w",
         "fragile_gap_confirmed_w", "acwr_min_acute_load", "acwr_min_chronic_load",
+        "acwr_confirmed_min_chronic_load",
         "monotony_band_frac", "tiz_concentration_watch", "detraining_pctile",
     )
     FIXED_FACT_FIELDS = ("name", "birth_year", "units", "week_starts_on", "weight_kg")

@@ -33,7 +33,8 @@ from coach import store, capture as coach_capture     # noqa: E402
 from coach.orchestrator import Coach                   # noqa: E402
 from coach.retrieval import MethodologyIndex           # noqa: E402
 from plan import store as plan_store, generator as plan_gen, diary as plan_diary, review as plan_review  # noqa: E402
-from plan import progression as plan_progression  # noqa: E402
+from plan import progression as plan_progression, narrative as plan_narrative  # noqa: E402
+from coach.config import DEFAULT as COACH_CFG  # noqa: E402
 from watchman import trend as wm_trend                 # noqa: E402  (projection helper for hold preview)
 
 WKO_DB = os.environ.get("WKO_DB", os.path.join(ROOT, "slice0", "wko.db"))
@@ -567,9 +568,17 @@ def coach_dashboard(as_of: str = Query(None)):
     synthesizes coaching copy."""
     _require_loaded()
     ao = as_of or _S["as_of"]
-    hero = wm_trend._hero(_S["m"], ao, _S.get("plan"), _S.get("status"))
+    watch = select(_S["findings"], ao, _S["m"])          # active alert/watch for this date
+    hero = wm_trend._hero(_S["m"], ao, _S.get("plan"), watch["status"])
     prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
-    return plan_review.coach_card(hero, prog)
+    card = plan_review.coach_card(hero, prog, watch=watch)
+    # Polish the grounded paragraph groups into a coherent multi-paragraph read (cached per state;
+    # deterministic fallback so the card renders even with no model/key). The UI prefers `prose`,
+    # keeps `narrative` as the fallback array.
+    coach = _S.get("coach")
+    card["prose"] = plan_narrative.polish(card.get("narrative_paragraphs") or [], _S.get("conn"),
+                                          coach.client if coach else None, COACH_CFG)
+    return card
 
 
 def _progression_text(p):

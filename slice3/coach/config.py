@@ -23,6 +23,9 @@ class CoachConfig:
     # Current Anthropic model id (verified 2026-06); defined ONCE here, never inline.
     model: str = "claude-opus-4-8"
     max_tokens: int = 1200
+    # Dashboard narrative polish is a pure reword-with-fixed-facts job — no reasoning — so it runs
+    # on the cheaper/faster Sonnet tier ($3/$15 vs Opus $5/$25 per MTok), not the coach's Opus.
+    narrative_model: str = "claude-sonnet-4-6"
     # Capture: how far back a note may be dated relative to the check-in date.
     capture_lookback_days: int = 14
 
