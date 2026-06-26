@@ -1,7 +1,8 @@
 """Metrics engine — turns Strava-derived ride summaries into the daily + per-workout rows the app
-consumes (TSS / CTL / ATL / TSB + the power-duration estimates), with NO WKO5 input. Fully
-self-consistent: a rolling 90-day Critical Power IS the FTP used for TSS, so the whole pipeline
-stands on raw power alone. Validated vs WKO5 (validate.py): mFTP r≈0.95, CTL r≈0.97 once warm.
+consumes (TSS / CTL / ATL / TSB + the power-duration estimates), with NO WKO5 input. TSS uses the
+athlete's dated set-FTP history (see _ftp_resolver); the modeled mFTP comes from an Om3CP power-
+duration fit (see pd_model). Validated vs WKO5: mFTP r≈0.75, Pmax r≈0.95 (observed 5 s), CTL r≈0.97
+once warm. TTE/FRC are NOT emitted — not reproducible from Strava MMP (see backlog).
 
 Stage 1 scope = the validated core (load + PD + CP/W′/Pmax). Stream/HR/wellness-dependent fields
 (EF, Pw:HR decoupling, power-zone TiZ, TTE model, HRV/sleep/RHR/weight) are deferred → emitted as
@@ -14,6 +15,8 @@ RUNWAY, so a real pull seeds from FULL history (the first ~6 weeks of any window
 from __future__ import annotations
 
 import datetime as dt
+
+from . import pd_model
 
 CTL_TC, ATL_TC = 42.0, 7.0
 CP_WINDOW_DAYS = 90
@@ -45,10 +48,28 @@ def _rolling_best(by_date, win_key, days, asof):
     for d, rides in by_date.items():
         if lo <= d <= asof:
             for r in rides:
+                if r.get("device_watts") is False:        # estimated power → out of the PD curve
+                    continue
                 v = (r.get("mmp") or {}).get(win_key)
                 if v and (best is None or v > best):
                     best = v
     return best
+
+
+def _rolling_envelope(by_date, days, asof):
+    """The 90-day max-mean-power envelope {duration_s(str): watts} — the curve Om3CP fits. Excludes
+    estimated-power rides (Strava device_watts False), whose power is unreliable for max efforts."""
+    lo = (dt.date.fromisoformat(asof) - dt.timedelta(days=days)).isoformat()
+    env = {}
+    for d, rides in by_date.items():
+        if lo <= d <= asof:
+            for r in rides:
+                if r.get("device_watts") is False:
+                    continue
+                for k, v in (r.get("mmp") or {}).items():
+                    if v and (k not in env or v > env[k]):
+                        env[k] = v
+    return env
 
 
 def _cp_wprime(p_short, p_long):
@@ -60,7 +81,9 @@ def _cp_wprime(p_short, p_long):
 
 
 def _series(summaries):
-    """Shared pass: per-date rolling CP/W′/Pmax (raw 90-day best, carried over ride-less days).
+    """Shared pass: per-date modeled CP (Om3CP fit of the 90-day curve, ≈ mFTP) + legacy 2-pt W'
+    + observed Pmax, carried over ride-less days. CP is refit only when a new ride enters the window
+    (perf — CP is slow-moving), then held until the next ride.
     Returns (by_date, start, end, cp_at, wprime_at, pmax_at, ftp_fallback)."""
     by = rides_by_date(summaries)
     if not by:
@@ -69,10 +92,14 @@ def _series(summaries):
     cp_at, wprime_at, pmax_at = {}, {}, {}
     last_cp = last_wp = None
     for d in _drange(start, end):
-        cp, wp = _cp_wprime(_rolling_best(by, W_SHORT, CP_WINDOW_DAYS, d),
-                            _rolling_best(by, W_LONG, CP_WINDOW_DAYS, d))
-        if cp:
-            last_cp, last_wp = cp, wp
+        if d in by:                                       # new data in the window → refit
+            env = _rolling_envelope(by, CP_WINDOW_DAYS, d)
+            cp = pd_model.fit_cp(env)
+            _, wp = _cp_wprime(env.get(W_SHORT), env.get(W_LONG))   # legacy W' (low-confidence FRC)
+            if cp:
+                last_cp = cp
+            if wp:
+                last_wp = wp
         cp_at[d], wprime_at[d] = last_cp, last_wp
         pmax_at[d] = _rolling_best(by, "5", CP_WINDOW_DAYS, d)
     ftp_fallback = next((v for v in cp_at.values() if v), 180.0)
