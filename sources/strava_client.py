@@ -45,6 +45,15 @@ def get_athlete_ftp() -> float | None:
         return None
 
 
+def get_athlete_zones() -> dict | None:
+    """The athlete's configured heart-rate + power zones (needs profile:read_all). HR-zone bounds
+    give us an LTHR-equivalent with no field test → unlocks HR-zone time-in-zone. None on error."""
+    try:
+        return _get("/athlete/zones")
+    except Exception:
+        return None
+
+
 def get_streams(activity_id: int,
                 keys=("time", "watts", "heartrate", "cadence")) -> dict[str, list]:
     """Per-second streams for one activity, as {key: [values]} aligned by index."""

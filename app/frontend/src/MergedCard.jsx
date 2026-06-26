@@ -128,7 +128,7 @@ export default function MergedCard({ meta, onSeeWeek, onReply }) {
   return (
     <div className="panel merged-card">
       <div className="mc-grid">
-        <div className="mc-portrait"><Wattson mood={mood} viewBox={VB_HEAD} /></div>
+        <div className="mc-portrait"><Wattson mood={mood} viewBox={VB_HEAD} interactive /></div>
 
         <div className="mc-main">
           <div className="mc-head">
