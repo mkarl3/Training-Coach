@@ -68,7 +68,7 @@ export function paletteForDate(now = new Date()) {
   return key ? TOUR_PALETTES[key] : DEFAULT_PALETTE;
 }
 
-function rects(expr, palette = DEFAULT_PALETTE, wink = false) {
+function rects(expr, palette = DEFAULT_PALETTE, wink = false, present = false) {
   const cap = palette.cap, jac = palette.jac;
   let r = "";
   const P = (x, y, w, h, c) => { if (c) r += `<rect x="${x*S}" y="${y*S}" width="${w*S}" height="${h*S}" fill="${c}"/>`; };
@@ -108,27 +108,33 @@ function rects(expr, palette = DEFAULT_PALETTE, wink = false) {
     [[8,2],[12,2],[7,5]].forEach(([x,y]) => P(x, y, 2, 2, R));                     // cap
     [[5,22],[11,22],[15,22],[6,25],[14,25]].forEach(([x,y]) => P(x, y, 2, 2, R));  // jersey — 2x2 dots, scattered
   }
+  if (present) {                                       // celebration "presenting" pose: a bent arm reaching out
+    P(14,18,9,4,O); P(20,11,5,9,O);                    // dark outlined silhouette (upper arm + forearm/hand)
+    P(15,19,7,2,jac.m); P(15,19,7,1,jac.l); P(21,18,3,1,jac.l); // upper-arm sleeve (recolors with the jersey) + cuff
+    P(21,14,3,4,sk.b); P(23,14,1,4,sk.s);              // forearm
+    P(21,12,3,2,sk.b); P(21,12,3,1,sk.s);              // hand — grips the held object
+  }
   return r;
 }
 
 export const VB_FULL = "0 0 132 174";
 export const VB_HEAD = "0 0 132 132";
+export const VB_PRESENT = "0 0 192 174";   // wider — room for the presenting arm + the held object
 
 // mood from board status: alert/watch -> alarmed; green -> approving (a clean board is earned).
 export function moodFromStatus(status) {
   return status === "green" ? "approving" : status === "awaiting" ? "calm" : "alarmed";
 }
 
-// Big-ride celebration: pick one flourish, stable per achievement (seed by the ride's date so it
-// doesn't flicker on re-render, but varies ride to ride). Skips the trophy per design.
-const CELEBRATIONS = ["cowbell", "champagne", "chapeau"]; // drawn large in the celebration moment, so all read
-export function celebrationFlair(seed = "") {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return CELEBRATIONS[h % CELEBRATIONS.length];
+// Big-ride celebration: the three objects Wattson holds up, CYCLED in order as achievements are
+// earned (cowbell → champagne → trophy → loop). Caller passes the running achievement count.
+export const CELEBRATIONS = ["cowbell", "champagne", "trophy"];
+export function celebrationFlair(count = 0) {
+  const n = CELEBRATIONS.length;
+  return CELEBRATIONS[((count % n) + n) % n];
 }
 
-export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, style, date, wink = false, interactive = false }) {
+export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, style, date, wink = false, interactive = false, present = false, accessory = "" }) {
   const palette = paletteForDate(date ? new Date(date) : new Date()); // date override aids testing
   // Hidden interaction: 5 quick taps → a wink. Off by default so it never hijacks the coachbar button.
   const [winking, setWinking] = useState(false);
@@ -143,6 +149,6 @@ export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, s
     <svg className={className} viewBox={viewBox} shapeRendering="crispEdges" onClick={onClick}
       style={{ width: "100%", height: "auto", imageRendering: "pixelated", display: "block",
                ...(interactive ? { cursor: "pointer" } : null), ...style }}
-      dangerouslySetInnerHTML={{ __html: rects(mood, palette, wink || winking) }} />
+      dangerouslySetInnerHTML={{ __html: rects(mood, palette, wink || winking, present) + (accessory || "") }} />
   );
 }

@@ -1,77 +1,88 @@
-import React from "react";
-import Wattson, { VB_FULL } from "./Wattson.jsx";
+import React, { useEffect } from "react";
+import Wattson, { VB_PRESENT } from "./Wattson.jsx";
 
-// The big-ride celebration "moment" — a dismissible card Wattson shows when you've earned it
-// (century / Everesting / longest-ever ride). The flourish (cowbell / champagne / chapeau) is
-// drawn LARGE here, at a high pixel budget, so it actually reads — unlike a 5px sprite prop.
-// Wattson celebrates YOU; he never wears the prize. Stays until the next ride (caller's job).
+// The big-ride celebration "moment" — Coach Wattson, in his presenting pose, holds an oversized
+// object up FOR you (you earned it; he never wears the prize). Shown in the weekly check-in.
+// Objects cycle cowbell → champagne → trophy (see celebrationFlair in Wattson.jsx). The object is
+// drawn at the sprite's own pixel grid (S=6) and handed to <Wattson present accessory=…/>, so it
+// sits in his hand and the sleeve recolors with the active jersey.
+// SOUND: bundled WAV samples in public/sounds/ (generated, not recordings) — drop a different file
+// at the same path to retune, no code change.
 
-const PS = 10; // prop pixel size
-function buildProp(draw) {
-  let r = "";
-  const P = (x, y, w, h, c) => { if (c) r += `<rect x="${x*PS}" y="${y*PS}" width="${w*PS}" height="${h*PS}" fill="${c}"/>`; };
-  const [w, h] = draw(P);
-  return { __html: r, vb: `0 0 ${w*PS} ${h*PS}` };
+const S = 6;
+const R = (x, y, w, h, c) => (c ? `<rect x="${x*S}" y="${y*S}" width="${w*S}" height="${h*S}" fill="${c}"/>` : "");
+
+// ---- the three held objects, positioned in his hand (cols ~21-23, rows ~12-14) ----
+function cowbellMarkup() {
+  const X = 18, br = "#cf9a1e", brL = "#ecc94f", brD = "#8a6410", mouth = "#241c06", strap = "#5a4018", clap = "#4a3608";
+  let s = ""; const P = (x, y, w, h, c) => { s += R(x + X, y, w, h, c); };
+  P(4,0,3,1,strap); P(3,1,1,1,strap); P(7,1,1,1,strap); P(2,2,8,1,brD);
+  [[3,3,6],[4,3,6],[5,2,8],[6,2,8],[7,1,10],[8,1,10],[9,1,10],[10,0,12]]
+    .forEach(([y,x,w]) => { P(x,y,w,1,br); P(x,y,1,1,brL); P(x+w-1,y,1,1,brD); });
+  P(5,3,1,7,brL); P(0,11,12,1,brD); P(1,12,10,1,mouth); P(5,12,2,2,clap);
+  return `<g class="cb-bell">${s}</g>`;
 }
-
-// roadside cowbell — brass bell, hanger strap, clapper, ring-motion marks
-function cowbell(P) {
-  const br = "#d2a02a", brL = "#f0cf63", brD = "#9a6f12", mouth = "#241c06", strap = "#6e4a22", clap = "#4a3608";
-  P(6,0,3,1,strap); P(5,1,1,2,strap); P(9,1,1,2,strap);                 // hanger loop
-  [[3,5,5],[4,5,5],[5,4,7],[6,4,7],[7,3,9],[8,3,9],[9,3,9],[10,2,11],[11,2,11],[12,2,11]]
-    .forEach(([y,x,w]) => { P(x,y,w,1,br); P(x,y,1,1,brL); P(x+w-1,y,1,1,brD); }); // trapezoid body
-  P(1,13,13,1,brD); P(2,14,11,1,mouth);                                 // flared lip + mouth
-  P(6,14,2,2,clap); P(7,16,1,1,clap);                                   // clapper
-  P(0,5,1,1,"#cfd6e0"); P(1,4,1,1,"#cfd6e0"); P(13,5,1,1,"#cfd6e0"); P(12,4,1,1,"#cfd6e0"); // ringing
-  return [14, 17];
+function champagneMarkup() {
+  const X = 19, g = "#1d6e3a", gL = "#3aa564", gD = "#0d4222", foil = "#d4af37", label = "#f2f4f8", cork = "#c9a46a";
+  let b = ""; const P = (x, y, w, h, c) => { b += R(x + X, y, w, h, c); };
+  P(2,1,2,4,g); P(2,1,1,4,gL); P(2,1,2,1,foil); P(2,2,2,1,"#b8932c");
+  P(1,5,4,1,g); P(0,6,6,2,g); P(0,8,6,6,g); P(0,6,1,8,gL); P(5,6,1,8,gD); P(0,10,6,2,label); P(1,13,4,1,gD);
+  const corkM = `<g class="cb-cork">${R(2+X,-1,2,1,cork) + R(2+X,-2,2,1,"#e0c089")}</g>`;
+  const bottle = `<g class="cb-bottle">${b}${corkM}</g>`;
+  const vecs = [[-7,-30],[7,-34],[0,-44],[-12,-20],[12,-22]]; let fz = "";
+  vecs.forEach((v, i) => { fz += `<g class="cb-fizz" style="--tx:${v[0]}px;--ty:${v[1]}px;animation-delay:${i*0.05}s">${R(2+X,0,1,1,"#dff0ff")}</g>`; });
+  return bottle + fz;
 }
-
-// podium champagne — green bottle, cork popping, spray + confetti
-function champagne(P) {
-  const g = "#1d6e3a", gL = "#2f9e57", gD = "#0f4a26", foil = "#d4af37", label = "#eef1f5", cork = "#caa46a";
-  P(5,8,5,9,g); P(5,8,1,9,gL); P(9,8,1,9,gD);                           // body
-  P(6,11,3,2,label);                                                    // label
-  P(6,6,3,2,g); P(6,6,1,2,gL); P(7,4,2,2,g); P(7,4,2,1,foil);           // shoulder + neck + foil
-  P(8,1,1,1,cork); P(9,0,1,1,cork); P(8,2,1,1,cork);                    // cork flying
-  P(7,2,1,1,"#fff"); P(10,2,1,1,"#fff"); P(9,3,1,1,"#fff");             // spray
-  [[2,3,"#e02030"],[12,4,"#f5d020"],[1,6,"#1f6fd0"],[12,8,"#1e9e6a"],[3,1,"#f5d020"],[11,1,"#e02030"],[2,9,"#1f6fd0"]]
-    .forEach(([x,y,c]) => P(x,y,1,1,c));                                // confetti
-  return [14, 18];
+function trophyMarkup() {
+  const X = 17, gold = "#e6c12f", goldL = "#f6dd6b", goldD = "#b8881a", plinth = "#7a5a18";
+  let t = ""; const P = (x, y, w, h, c) => { t += R(x + X, y, w, h, c); };
+  P(3,1,8,1,goldD); P(2,2,10,1,gold); P(2,3,10,2,gold); P(3,5,8,1,gold); P(4,6,6,1,gold); P(5,7,4,1,gold);
+  P(3,2,1,3,goldL); P(10,2,1,3,goldD);
+  P(0,2,2,1,gold); P(0,3,1,2,gold); P(1,4,1,1,gold); P(12,2,2,1,gold); P(13,3,1,2,gold); P(12,4,1,1,gold);
+  P(6,8,2,2,goldD); P(4,10,6,1,gold); P(3,11,8,2,plinth); P(3,13,8,1,goldD);
+  return t + `<g class="cb-glint">${R(3+X,2,1,7,"#fff8d8")}</g>`;
 }
-
-// chapeau — his cycling cap, doffed (hats off, the cyclist's salute), with a little tip-sparkle
-function chapeau(P) {
-  const m = "#e84444", d = "#a82828", l = "#ff8a8a", acc = "#f0f0f0", O = "#14121f";
-  P(5,0,4,1,O);                                                         // top outline (rounded crown)
-  P(5,1,4,1,m); P(4,2,6,1,m); P(3,3,8,1,m); P(3,4,8,1,m); P(3,5,8,1,m); // crown
-  P(3,3,1,3,d); P(10,3,1,3,d); P(5,1,2,1,l);                            // shade + highlight
-  P(3,4,8,1,acc);                                                       // accent stripe
-  P(3,6,11,1,l); P(13,6,1,1,l); P(3,7,12,1,d);                          // forward peak (points right)
-  P(13,0,1,1,"#f7d51d"); P(14,1,2,1,"#f7d51d"); P(13,2,1,1,"#f7d51d");  // tip sparkle
-  return [16, 9];
-}
-
-const PROPS = { cowbell, champagne, chapeau };
+const OBJ = { cowbell: cowbellMarkup, champagne: champagneMarkup, trophy: trophyMarkup };
 const CONFETTI = ["#e02030","#f5d020","#1f6fd0","#1e9e6a","#e6398a","#f7d51d"];
 
-export default function Celebration({ title = "You earned this!", subtitle = "", flair = "cowbell", onDismiss }) {
-  const prop = buildProp(PROPS[flair] || PROPS.cowbell);
+const CSS = `
+.cb-bell{transform-box:fill-box;transform-origin:50% 4%;animation:cbring 1.5s ease-in-out infinite}
+@keyframes cbring{0%,100%{transform:rotate(-12deg)}50%{transform:rotate(12deg)}}
+.cb-bottle{transform-box:fill-box;transform-origin:50% 96%;transform:rotate(13deg)}
+.cb-cork{animation:cbpop 2.6s ease-out infinite}
+@keyframes cbpop{0%,6%{transform:translateY(0);opacity:1}74%{opacity:1}100%{transform:translateY(-104px);opacity:0}}
+.cb-fizz{animation:cbburst 2.6s ease-out infinite;opacity:0}
+@keyframes cbburst{0%{transform:translate(0,0);opacity:0}12%{opacity:1}100%{transform:translate(var(--tx),var(--ty));opacity:0}}
+.cb-glint{animation:cbsweep 2.6s linear infinite;opacity:0}
+@keyframes cbsweep{0%,55%{transform:translateX(-26px) skewX(-20deg);opacity:0}68%,82%{opacity:.85}100%{transform:translateX(70px) skewX(-20deg);opacity:0}}
+`;
+
+// ---- sound: bundled WAV samples (served from public/sounds; swap the files to retune) ----
+const SOUND = { cowbell: "/sounds/cowbell.wav", champagne: "/sounds/champagne.wav", trophy: "/sounds/trophy.wav" };
+function playSound(flair) {
+  const a = new Audio(SOUND[flair] || SOUND.cowbell);
+  a.volume = 0.85;
+  a.play().catch(() => {});   // autoplay is fine here — the check-in is reached via user gestures
+}
+
+export default function Celebration({ title = "You earned this!", subtitle = "", flair = "cowbell", sound = true, onDismiss }) {
+  const markup = (OBJ[flair] || OBJ.cowbell)();
+  useEffect(() => { if (sound) { try { playSound(flair); } catch (e) { /* autoplay may be blocked until a gesture */ } } }, [flair, sound]);
   return (
-    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 18, overflow: "hidden",
-                  background: "#1b1930", border: "2px solid #2f2c4a", borderRadius: 14, padding: "18px 20px",
+    <div style={{ position: "relative", overflow: "hidden", background: "#1b1930", border: "2px solid #2f2c4a",
+                  borderRadius: 14, padding: "20px 20px 18px", textAlign: "center",
                   fontFamily: "var(--font-sans, system-ui)", color: "#f0eefc" }}>
+      <style>{CSS}</style>
       <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 10, display: "flex" }}>
-        {Array.from({ length: 28 }).map((_, i) => (
+        {Array.from({ length: 30 }).map((_, i) => (
           <div key={i} style={{ flex: 1, height: i % 3 ? 6 : 10, background: CONFETTI[i % CONFETTI.length] }} />
         ))}
       </div>
-      <div style={{ width: 96, flexShrink: 0 }}><Wattson mood="approving" viewBox={VB_FULL} /></div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 4 }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 15, color: "#c7c3e6" }}>{subtitle}</div>}
+      <div style={{ width: 250, maxWidth: "70%", margin: "6px auto 0" }}>
+        <Wattson mood="approving" present accessory={markup} viewBox={VB_PRESENT} />
       </div>
-      <svg viewBox={prop.vb} width={110} shapeRendering="crispEdges"
-           style={{ imageRendering: "pixelated", flexShrink: 0 }} dangerouslySetInnerHTML={{ __html: prop.__html }} />
+      <div style={{ fontSize: 22, fontWeight: 600, marginTop: 6 }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 15, color: "#c7c3e6", marginTop: 2 }}>{subtitle}</div>}
       {onDismiss && (
         <button onClick={onDismiss} aria-label="Dismiss" style={{ position: "absolute", top: 8, right: 10,
                 background: "none", border: "none", color: "#9a96bd", fontSize: 18, cursor: "pointer" }}>×</button>

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Wattson, { VB_FULL } from "./Wattson.jsx";
+import Celebration from "./Celebration.jsx";
 
 // The Weekly Check-In — a full-screen NES "cartridge" Coach Wattson LEADS. Six rounds, each a
 // screen; advancing SCROLLS DOWN to the next (Punch-Out style, slow ease). Wattson is a big sprite
@@ -90,6 +91,21 @@ function ProjChart({ history, planned, eased }) {
 export default function CheckIn({ meta, onClose, onPlanChanged }) {
   const [step, setStep] = useState(0);              // highest unlocked round
   const [convId, setConvId] = useState(meta?.latest_conversation_id || null);
+  const [ach, setAch] = useState(null);             // pending big-ride achievement → Wattson's celebration
+
+  useEffect(() => {                                  // greet you with the celebration if you earned one
+    fetch(`/api/achievements/pending`).then((r) => r.json())
+      .then((d) => setAch(d.achievement || null)).catch(() => {});
+  }, []);
+
+  function dismissAch() {                            // hide it; it'd otherwise stay until your next ride
+    const id = ach?.ride_id;
+    setAch(null);
+    if (id) fetch(`/api/achievements/dismiss`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ride_id: String(id) }),
+    }).catch(() => {});
+  }
 
   const [loaded, setLoaded] = useState(null);       // {data_through} | "skipped"
   const [loadErr, setLoadErr] = useState(null);
@@ -279,6 +295,11 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
       </div>
 
       <div className="ci-scroll" ref={scroller}>
+        {ach && (
+          <div style={{ maxWidth: 520, margin: "16px auto 4px", padding: "0 16px" }}>
+            <Celebration flair={ach.flair} title={ach.title} subtitle={ach.subtitle} onDismiss={dismissAch} />
+          </div>
+        )}
         {/* ROUND 1 — LOAD YOUR WEEK */}
         <section className="ci-round" ref={(el) => (roundRefs.current[0] = el)}>
           <div className="ci-label">ROUND 1 · LOAD YOUR WEEK</div>

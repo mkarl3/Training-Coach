@@ -1122,6 +1122,30 @@ def update_profile(body: ProfileIn):
     return {"ok": True, "board_status": _S["status"], "data_through": _S["as_of"]}
 
 
+# ---------------- big-ride achievements (Wattson's celebration moment) ----------------
+@app.get("/api/achievements/pending")
+def achievements_pending():
+    """The achievement to celebrate now (century / huge climb / longest-ever on the most recent
+    ride), or {achievement: null}. The frontend's Celebration shows Wattson holding the object."""
+    _require_loaded()
+    from sources import pull_history, achievements
+    summaries = list(pull_history.load_cache().values())
+    return {"achievement": achievements.pending(summaries, achievements.dismissed_ids(_S["conn"]))}
+
+
+class AchievementDismissIn(BaseModel):
+    ride_id: str
+
+
+@app.post("/api/achievements/dismiss")
+def achievements_dismiss(body: AchievementDismissIn):
+    """Stop showing the celebration for this ride (it would otherwise stay until the next ride)."""
+    _require_loaded()
+    from sources import achievements
+    achievements.dismiss(_S["conn"], body.ride_id)
+    return {"ok": True}
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "loaded": bool(_S)}
