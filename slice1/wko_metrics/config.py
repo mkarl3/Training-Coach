@@ -133,7 +133,13 @@ class DetectorConfig:
         "under_load": {"metric": "ramp_rate", "op": ">=", "value": 1.0, "for_weeks": 3},
         "overtraining": {"metric": "tsb", "op": ">=", "value": 0, "for_days": 7},
         "fragile_ftp": {"metric": "decoupling_pct", "op": "<", "value": 5.0},
-        "injury_spike": {"metric": "acwr", "op": "<", "value": 1.3, "for_days": 7},
+        # injury_spike is an ACUTE one-day event, not a chronic condition — a single big day washes
+        # out of the 7-day acute window fast, so recovery is demonstrated in a few easy days, not a
+        # week. It clears on 3 clean days back under the line (vs the full week the chronic detectors
+        # need). The 10-day tripwire recency window stays the backstop for when weekend rides keep
+        # breaking the streak. Shortening this doesn't blind sustained overload — that's overtraining
+        # / monotony, which keep their own 7-day resets.
+        "injury_spike": {"metric": "acwr", "op": "<", "value": 1.3, "for_days": 3},
         "monotony": {"metric": "monotony", "op": "<", "value": 1.5, "for_days": 7},
     })
 
