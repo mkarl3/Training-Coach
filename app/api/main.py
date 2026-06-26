@@ -237,9 +237,11 @@ def intake_status():
 @app.get("/api/meta")
 def meta():
     last = store.latest_conversation(_S["conn"]) if _S.get("conn") else None
+    prof = _S.get("profile")
     return {"date_min": _S["date_min"], "date_max": _S["as_of"],
             "default_as_of": _S["as_of"], "board_status": _S["status"],
-            "latest_conversation_id": last[0] if last else None}
+            "latest_conversation_id": last[0] if last else None,
+            "birthday": bool(prof and prof.is_birthday_week(datetime.date.today()))}
 
 
 @app.get("/api/watchman")
@@ -1075,8 +1077,8 @@ def training_log(year: int = Query(None), month: int = Query(None)):
 
 # ---------------- athlete profile ----------------
 _INT_FIELDS = {"birth_year", "floor_hold_weeks", "floor_window_months"}
-_STR_FIELDS = {"name", "units", "week_starts_on"}
-_NULLABLE = {"birth_year", "weight_kg"}      # empty weight saves as None (float otherwise)
+_STR_FIELDS = {"name", "units", "week_starts_on", "birth_date"}
+_NULLABLE = {"birth_year", "weight_kg", "birth_date"}   # empty saves as None
 
 
 def _coerce(field, value):
@@ -1115,6 +1117,11 @@ def update_profile(body: ProfileIn):
     for k, v in body.updates.items():
         if k in valid:
             merged[k] = _coerce(k, v)
+    if merged.get("birth_date"):                     # keep birth_year (age/masters) in sync with the DOB
+        try:
+            merged["birth_year"] = int(str(merged["birth_date"])[:4])
+        except (ValueError, TypeError):
+            pass
     new_profile = AthleteProfile(**merged)
     profile.save_profile(_S["conn"], new_profile)
     _S["profile"] = new_profile

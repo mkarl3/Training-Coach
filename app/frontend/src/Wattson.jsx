@@ -68,7 +68,7 @@ export function paletteForDate(now = new Date()) {
   return key ? TOUR_PALETTES[key] : DEFAULT_PALETTE;
 }
 
-function rects(expr, palette = DEFAULT_PALETTE, wink = false, present = false) {
+function rects(expr, palette = DEFAULT_PALETTE, wink = false, present = false, birthday = false) {
   const cap = palette.cap, jac = palette.jac;
   let r = "";
   const P = (x, y, w, h, c) => { if (c) r += `<rect x="${x*S}" y="${y*S}" width="${w*S}" height="${h*S}" fill="${c}"/>`; };
@@ -114,6 +114,13 @@ function rects(expr, palette = DEFAULT_PALETTE, wink = false, present = false) {
     P(21,14,3,4,sk.b); P(23,14,1,4,sk.s);              // forearm
     P(21,12,3,2,sk.b); P(21,12,3,1,sk.s);              // hand — grips the held object
   }
+  if (birthday) {                                      // birthday week: a tall party-hat cone + confetti
+    P(10,-6,1,1,"#ffffff");                            // pom on the tip (needs the headroom-expanded viewBox)
+    P(10,-5,2,1,"#ff5aa0"); P(9,-4,3,1,"#ffd23f"); P(9,-3,4,1,"#3ec8e0"); // cone, narrow tip…
+    P(8,-2,5,1,"#ff5aa0"); P(8,-1,6,1,"#ffd23f"); P(7,0,7,1,"#3ec8e0"); P(7,1,8,1,"#ff5aa0"); // …widening to the base
+    const CF = ["#ff5aa0","#ffd23f","#3ec8e0","#7ac043","#a86ad6"];
+    [[2,2],[3,5],[1,8],[18,3],[19,6],[17,9],[14,-4],[4,-3]].forEach(([x,y],i) => P(x,y,1,1,CF[i % CF.length])); // confetti
+  }
   return r;
 }
 
@@ -134,8 +141,12 @@ export function celebrationFlair(count = 0) {
   return CELEBRATIONS[((count % n) + n) % n];
 }
 
-export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, style, date, wink = false, interactive = false, present = false, accessory = "" }) {
+export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, style, date, wink = false, interactive = false, present = false, accessory = "", birthday = false }) {
   const palette = paletteForDate(date ? new Date(date) : new Date()); // date override aids testing
+  // birthday: the tall cone pokes above the head, so add headroom to the top of the viewBox
+  const vb = birthday
+    ? (() => { const [x, y, w, h] = String(viewBox).trim().split(/\s+/).map(Number); return `${x} ${y - 42} ${w} ${h + 42}`; })()
+    : viewBox;
   // Hidden interaction: 5 quick taps → a wink. Off by default so it never hijacks the coachbar button.
   const [winking, setWinking] = useState(false);
   const taps = useRef(0), timer = useRef(null);
@@ -146,9 +157,9 @@ export default function Wattson({ mood = "calm", viewBox = VB_HEAD, className, s
     if (taps.current >= 5) { taps.current = 0; setWinking(true); setTimeout(() => setWinking(false), 900); }
   };
   return (
-    <svg className={className} viewBox={viewBox} shapeRendering="crispEdges" onClick={onClick}
+    <svg className={className} viewBox={vb} shapeRendering="crispEdges" onClick={onClick}
       style={{ width: "100%", height: "auto", imageRendering: "pixelated", display: "block",
                ...(interactive ? { cursor: "pointer" } : null), ...style }}
-      dangerouslySetInnerHTML={{ __html: rects(mood, palette, wink || winking, present) + (accessory || "") }} />
+      dangerouslySetInnerHTML={{ __html: rects(mood, palette, wink || winking, present, birthday) + (accessory || "") }} />
   );
 }

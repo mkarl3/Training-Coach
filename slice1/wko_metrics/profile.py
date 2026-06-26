@@ -31,6 +31,8 @@ class AthleteProfile:
 
     # --- fixed facts (unknown by default -> no behavior change until set) ---
     birth_year: int | None = None
+    birth_date: str | None = None                 # full DOB "YYYY-MM-DD" — drives the birthday egg;
+                                                  # birth_year is derived from it on save (age/masters)
     units: str = "imperial"                       # "imperial" (mi/lb) | "metric"
     week_starts_on: str = "monday"                # "monday" | "sunday" — drives calendar weeks
     weight_kg: float | None = None                # current weight (kg). v1 DISPLAY-ONLY — captured
@@ -78,6 +80,24 @@ class AthleteProfile:
         a = self.age(ref_year)
         return a is not None and a >= 40
 
+    def is_birthday_week(self, today):
+        """True within ±3 days of the birthday (a 7-day window). `today` is a datetime.date.
+        Compares month/day only, checking adjacent years so the window wraps across Dec/Jan."""
+        if not self.birth_date or len(self.birth_date) < 10:
+            return False
+        import datetime
+        try:
+            mo, dy = int(self.birth_date[5:7]), int(self.birth_date[8:10])
+        except ValueError:
+            return False
+
+        def bday(y):
+            try:
+                return datetime.date(y, mo, dy)
+            except ValueError:                        # Feb 29 in a common year
+                return datetime.date(y, mo, 28)
+        return min(abs((today - bday(y)).days) for y in (today.year - 1, today.year, today.year + 1)) <= 3
+
     # which fields are the "tuned / advanced" set (UI marks these change-with-care)
     TUNED_FIELDS = (
         "floor_hold_weeks", "floor_window_months", "gap_fitness_percentile",
@@ -87,7 +107,7 @@ class AthleteProfile:
         "acwr_confirmed_min_chronic_load",
         "monotony_band_frac", "tiz_concentration_watch", "detraining_pctile",
     )
-    FIXED_FACT_FIELDS = ("name", "birth_year", "units", "week_starts_on", "weight_kg")
+    FIXED_FACT_FIELDS = ("name", "birth_date", "units", "week_starts_on", "weight_kg")
 
 
 DEFAULT_PROFILE = AthleteProfile()

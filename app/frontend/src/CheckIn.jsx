@@ -33,10 +33,10 @@ const moodForVerdict = (v) =>
     : ["HOLD", "BACK_OFF", "NEEDS_BENCHMARK", "PROCEED_WITH_DEBT"].includes(v) ? "alarmed" : "calm";
 
 // ---- Wattson speaking, with his options/readout beside him (no top/bottom split) ----
-function Beat({ mood = "calm", children }) {
+function Beat({ mood = "calm", birthday = false, children }) {
   return (
     <div className="ci-beat">
-      <div className="ci-sprite"><Wattson mood={mood} viewBox={VB_FULL} /><div className="ci-platform" /></div>
+      <div className="ci-sprite"><Wattson mood={mood} viewBox={VB_FULL} birthday={birthday} /><div className="ci-platform" /></div>
       <div className="ci-say pbox">
         <div className="ci-who">COACH WATTSON</div>
         <div className="ci-body">{children}</div>
@@ -266,6 +266,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
   }
 
   // ---- derived readout values ----
+  const bday = !!meta?.birthday;                    // birthday week → party hat on the check-in sprite
   const wr = b?.week_reviewed, pmc = b?.pmc, nw = b?.next_week;
   const ctlNow = pmc?.ctl?.now, ctlD = pmc?.ctl?.delta_7d;
   const streak = b?.streak ?? 0;
@@ -303,7 +304,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
         {/* ROUND 1 — LOAD YOUR WEEK */}
         <section className="ci-round" ref={(el) => (roundRefs.current[0] = el)}>
           <div className="ci-label">ROUND 1 · LOAD YOUR WEEK</div>
-          <Beat mood={loaded ? "approving" : "calm"}>
+          <Beat birthday={bday} mood={loaded ? "approving" : "calm"}>
             {!loaded ? (
               <>
                 <p>Let's load this week first — drop in your latest WKO5 export and I'll read it.</p>
@@ -359,7 +360,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
                   </div>
                 </div>
               </div>
-              <Beat mood={legs && flagged(legs) ? "alarmed" : legs ? "approving" : "calm"}>
+              <Beat birthday={bday} mood={legs && flagged(legs) ? "alarmed" : legs ? "approving" : "calm"}>
                 {!legs ? <p>So how did your legs actually feel this week?</p>
                   : legsReply ? <p>{say(legsReply)}</p>
                   : <p className="muted">reading that against your numbers…</p>}
@@ -382,7 +383,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
           {step < 2 ? <Locked /> : (
             <>
               {prog?.state === "ok" && gate ? (
-                <Beat mood={moodForVerdict(prog.verdict)}>
+                <Beat birthday={bday} mood={moodForVerdict(prog.verdict)}>
                   <p>{say(prog.headline || "")}</p>
                   {prog.transition_kind === "base_to_build" && fuPct != null ? (
                     <div className="ci-gauge">
@@ -410,7 +411,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
                   {prog.this_week_test && <p className="ci-test">This week: {prog.this_week_test}.</p>}
                 </Beat>
               ) : (
-                <Beat mood="calm">
+                <Beat birthday={bday} mood="calm">
                   <p>{prog?.state === "no_plan"
                     ? "No season plan loaded yet — set one up and I'll start gating your phases."
                     : "Your plan hasn't started yet — nothing to step up to this week."}</p>
@@ -429,7 +430,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
               <ProjChart history={trend?.series} planned={trend?.projection}
                 eased={canEase && choice !== "eased" ? preview?.projection_eased : null} />
               {canEase ? (
-                <Beat mood={choice === "eased" ? "approving" : "alarmed"}>
+                <Beat birthday={bday} mood={choice === "eased" ? "approving" : "alarmed"}>
                   {choice === "eased" ? (
                     <>
                       <p>Eased. {preview?.diff && diffSentence(preview.diff)} Backing off when you're fried is nearly free.</p>
@@ -448,7 +449,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
                   )}
                 </Beat>
               ) : (
-                <Beat mood="approving">
+                <Beat birthday={bday} mood="approving">
                   <p>Nothing to change — that green line is you, on plan. Keep it rolling.</p>
                 </Beat>
               )}
@@ -491,9 +492,9 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
                   {nw?.focus && <div className="ci-focus">FOCUS — {nw.focus}.{nw.field_test ? " ⚑ Field test this week." : ""}</div>}
                 </>
               ) : (
-                <Beat mood="calm"><p>No weekly plan to brief — set up a season to get a mission here.</p></Beat>
+                <Beat birthday={bday} mood="calm"><p>No weekly plan to brief — set up a season to get a mission here.</p></Beat>
               )}
-              <Beat mood="calm">
+              <Beat birthday={bday} mood="calm">
                 <p>Anything you want to ask before you lock in?</p>
                 {ask.map((m, i) => (
                   <p key={i} className={m.role === "user" ? "ci-ask-u" : ""}>{m.role === "coach" ? say(m.text) : m.text}</p>
@@ -515,7 +516,7 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
           <div className="ci-label">ROUND 6 · LOCKED IN</div>
           {step < 5 ? <Locked /> : (
             <>
-              <Beat mood="approving">
+              <Beat birthday={bday} mood="approving">
                 <p>Locked in. You showed up, you read the numbers, you made the call. That's the job.</p>
                 <div className="ci-streak">
                   <div className="ci-streak-h">ON-PLAN STREAK</div>

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 
 const LABELS = {
   name: "Name",
-  birth_year: "Birth year",
+  birth_date: "Date of birth",
   units: "Units",
   week_starts_on: "Week starts on",
 };
@@ -152,6 +152,8 @@ export default function Profile({ onClose, onSaved, onChanged, prefillFtp }) {
                       <option value="monday">Monday</option>
                       <option value="sunday">Sunday</option>
                     </select>
+                  ) : f === "birth_date" ? (
+                    <input type="date" value={form[f] ?? ""} onChange={(e) => set(f, e.target.value)} />
                   ) : (
                     <input
                       type={f === "name" ? "text" : "number"}
