@@ -129,7 +129,13 @@ class DetectorConfig:
     # Each: the metric + comparison that CLEARS an open finding. metric names map to
     # facade accessors; the watchman evaluates these, the detector only declares them.
     reset_conditions: dict = field(default_factory=lambda: {
-        "gap_unravel": {"metric": "consecutive_weeks_above_floor", "op": ">=", "value": 8},
+        # gap_unravel clears once you've re-held your base for 3 consecutive weeks above floor. Was 8
+        # weeks (56d), which could NEVER fit inside the finding's recency window (trend 28d / tripwire
+        # 10d) — so the reset was dead and the warning only ever aged out by time. 3 weeks (21d) fits
+        # the 28-day trend window, so a strong return-to-training now clears the standing gap zone
+        # early instead of waiting out the full window. (The acute early-warning tripwire still ages
+        # out via its own 10-day window — appropriate for a momentary "in a gap right now" event.)
+        "gap_unravel": {"metric": "consecutive_weeks_above_floor", "op": ">=", "value": 3},
         "under_load": {"metric": "ramp_rate", "op": ">=", "value": 1.0, "for_weeks": 3},
         "overtraining": {"metric": "tsb", "op": ">=", "value": 0, "for_days": 7},
         "fragile_ftp": {"metric": "decoupling_pct", "op": "<", "value": 5.0},
