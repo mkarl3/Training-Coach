@@ -220,7 +220,83 @@ def _concern_line(watch):
     return None
 
 
-def coach_card(hero, prog, watch=None):
+# Which modeled systems Wattson reads against each block — straight from the canonical blocks'
+# target_metric (config.py): Base 3 = "mFTP & TTE", Build 1 = "VO2/Pmax & mFTP", Build 2 = "Pmax",
+# Peak = season-best PD (top-end). Prep/Base 1-2 are aerobic-base (EF/frequency) — no PD focus.
+# A system off the block's focus list still surfaces if it moved notably (>= _SYS_NOTABLE_PCT).
+_BLOCK_SYSTEMS = {
+    "Prep": (), "Base 1": (), "Base 2": (),
+    "Base 3": ("mftp_w", "tte_sec"),
+    "Build 1": ("pvo2max_w", "pmax_w", "mftp_w"),
+    "Build 2": ("pmax_w",),
+    "Peak": ("pmax_w", "pvo2max_w"),
+    "Race": (),
+}
+_SYS_NOTABLE_PCT = 5.0       # off-focus systems are mentioned only on a move at least this big
+_SYS_MAX_LINES = 2          # keep the read tight — at most this many systems per card
+
+# Grounded clauses (lowercase; assembled into one sentence). `fix` is appended for a block-relevant
+# system that's sliding — names the work that brings it back (Wattson voice: direct + actionable).
+_SYS_COPY = {
+    "mftp_w":   {"rising": "your threshold is climbing — mFTP up to {v} W",
+                 "falling": "your threshold's eased back to {v} W",
+                 "flat": "your threshold's holding at {v} W",
+                 "fix": " — the duration work will lift it"},
+    "pvo2max_w": {"rising": "your aerobic power is responding — pVO2max at {v} W",
+                  "falling": "your aerobic power's slipped to {v} W",
+                  "flat": "your aerobic power's steady at {v} W",
+                  "fix": " — the VO2 work needs to land"},
+    "pmax_w":   {"rising": "your top-end's sharpening — Pmax up to {v} W",
+                 "falling": "your top-end's gone soft — Pmax down to {v} W",
+                 "flat": "your top-end's holding at {v} W",
+                 "fix": " — time for some sprints"},
+    "tte_sec":  {"rising": "your TTE is stretching out to {v} min",
+                 "falling": "your TTE's slipped to {v} min",
+                 "flat": "your TTE's steady at {v} min",
+                 "fix": " — get some longer threshold blocks in"},
+}
+
+
+def _sys_clause(col, s, relevant):
+    copy = _SYS_COPY[col]
+    c = copy[s["dir"]].format(v=s["value"])
+    if relevant and s["dir"] == "falling":
+        c += copy.get("fix", "")
+    return c
+
+
+def _join_clauses(picks, systems):
+    """Assemble (col, relevant) picks into one capitalized sentence, or None if empty."""
+    if not picks:
+        return None
+    clauses = [_sys_clause(c, systems[c], r) for c, r in picks]
+    txt = clauses[0]
+    for c in clauses[1:]:
+        txt += ", and " + c
+    return txt[0].upper() + txt[1:] + "."
+
+
+def _systems_lines(block, systems):
+    """Read the systems as two SEPARATE sentences, so each lands where it belongs in the narrative:
+      • `relevant` — the block's focus systems (any direction). These are evidence for the gate, so
+        they read alongside the plan/block paragraph.
+      • `notable`  — an off-focus system that ROSE notably (a real, positive surprise). This is a
+        by-the-way about current form, so it reads with the where-you-stand brief, not the plan.
+    An off-focus DECLINE is the expected cost of training something else (e.g. Pmax fading in Prep),
+    so it stays silent. Either sentence may be None."""
+    if not systems:
+        return {"relevant": None, "notable": None}
+    relevant = _BLOCK_SYSTEMS.get(block, ())
+    rel = sorted((c for c in relevant if c in systems),
+                 key=lambda c: -abs(systems[c]["delta_pct"]))[:_SYS_MAX_LINES]
+    notable = sorted((c for c, s in systems.items()
+                      if c not in relevant and s["dir"] == "rising" and s["delta_pct"] >= _SYS_NOTABLE_PCT),
+                     key=lambda c: -systems[c]["delta_pct"])[:1]   # one aside, kept tight
+    return {"relevant": _join_clauses([(c, True) for c in rel], systems),
+            "notable": _join_clauses([(c, False) for c in notable], systems)}
+
+
+def coach_card(hero, prog, watch=None, systems=None):
     """Compose the merged dashboard card: Wattson's deterministic narrative (the active concern +
     the hero read + this week's directive + the phase gate, folded into one voice), the glanceable
     vitals, and a gate-aware progress-visual spec. Pure — it arranges grounded numbers/strings,
@@ -232,12 +308,17 @@ def coach_card(hero, prog, watch=None):
                 "status": "awaiting", "verdict": None}
     d = hero.get("directive") or {}
     concern = _concern_line(watch)
+    block = prog["block"] if (prog and prog.get("state") == "ok") else None
+    sys_lines = _systems_lines(block, systems)
+    # The where-you-stand read: concern + fitness/form headline + any off-focus system that's risen
+    # (a form by-the-way belongs here, with current state — not wedged into the plan).
     n = ([concern] if concern else []) + [hero["headline"]]
+    if sys_lines["notable"]:
+        n.append(sys_lines["notable"])
     now_count = len(n)            # paragraph 1 = the concern + the current-state read; plan follows
     ok = bool(prog and prog.get("state") == "ok")
 
     if ok:
-        block = prog["block"]
         nb = prog.get("next_block") or "the next block"
         focus = prog.get("focus")
         watching = prog.get("watching")
@@ -252,6 +333,9 @@ def coach_card(hero, prog, watch=None):
                      + (f", and the focus is {focus}." if focus else "."))
         else:
             n.append(f"{block} is next up" + (f" — the focus is {focus}." if focus else "."))
+
+        if sys_lines["relevant"]:                         # block-focus systems = evidence for the gate
+            n.append(sys_lines["relevant"])
 
         if d.get("tss"):
             n.append(f"{d['pre']}{d['tss']} TSS{d['post']}")

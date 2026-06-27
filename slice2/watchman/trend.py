@@ -386,6 +386,37 @@ def _hero(m, as_of, plan, status):
     }
 
 
+# Per-system PD reads — shared by the "Your systems" panel (/api/systems) and the dashboard
+# narrative so the two never disagree. (col, display unit). TTE is stored in seconds, shown in min.
+_SYS_DEFS = (("mftp_w", "W"), ("pvo2max_w", "W"), ("pmax_w", "W"), ("tte_sec", "min"))
+
+
+def systems_read(m, as_of):
+    """Current value + recent direction for each modeled system, as of `as_of`. Direction = recent
+    28-day mean vs the prior 28–84-day mean, with a ±2% dead-band (rising/falling/flat). Returns a
+    dict keyed by column, each {value, unit, dir, delta_pct, spark}. Deterministic; THE ONE RULE."""
+    ao = pd.Timestamp(as_of)
+    daily = m.daily
+    out = {}
+    for col, unit in _SYS_DEFS:
+        if col not in daily.columns:
+            continue
+        s = pd.to_numeric(daily[col], errors="coerce")
+        s = s[s.index <= ao].dropna()
+        if s.empty:
+            continue
+        cur = float(s.iloc[-1])
+        recent = s[s.index > ao - pd.Timedelta(days=28)].mean()
+        prior = s[(s.index <= ao - pd.Timedelta(days=28)) & (s.index > ao - pd.Timedelta(days=84))].mean()
+        chg = (recent - prior) / prior * 100 if (prior and pd.notna(prior) and prior > 0) else 0.0
+        direction = "rising" if chg > 2 else "falling" if chg < -2 else "flat"
+        value = round(cur / 60, 1) if unit == "min" else round(cur)
+        spark = [round(float(v), 2) for v in s.resample("W").last().dropna().tail(40)]
+        out[col] = {"value": value, "unit": unit, "dir": direction,
+                    "delta_pct": round(chg, 1), "spark": spark}
+    return out
+
+
 def build_trend(m, findings, as_of, top_failures=3, plan=None, status=None):
     """Assemble the full trend-view payload for `as_of`. `plan` (optional) supplies the training
     blocks (hover scrubber), the live prescription (now-insight), and the forward projection."""

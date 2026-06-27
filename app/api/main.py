@@ -42,6 +42,27 @@ EXPORTS_DIR = os.path.join(ROOT, "WKO5 Exports")
 COACH_DB = os.path.join(ROOT, "slice3", "coach.db")
 INDEX_DB = os.path.join(ROOT, "slice3", "methodology.db")
 
+
+def _ensure_anthropic_key():
+    """The coach + narrative polish call Anthropic via `ANTHROPIC_API_KEY`. On Windows a key set with
+    `setx` lives in the user-level registry env, which a shell launched earlier won't have inherited
+    — so the backend would silently fall back to the un-polished narrative. If the var isn't already
+    in this process's env, pull it from HKCU\\Environment so polish works regardless of how we launch.
+    The value only ever enters os.environ; it is never logged. No-op off Windows / if already set."""
+    if os.environ.get("ANTHROPIC_API_KEY") or sys.platform != "win32":
+        return
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as k:
+            val, _ = winreg.QueryValueEx(k, "ANTHROPIC_API_KEY")
+        if val:
+            os.environ["ANTHROPIC_API_KEY"] = val
+    except OSError:
+        pass
+
+
+_ensure_anthropic_key()
+
 app = FastAPI(title="Watt Smith API", version="0.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -265,36 +286,20 @@ def consistency(as_of: str = Query(None)):
 @app.get("/api/systems")
 def systems():
     """Per-system trend readout — Threshold (mFTP), Aerobic power (pVO2max), Sprint (Pmax), and
-    Threshold hold (observed TTE): current value, recent direction, and a weekly sparkline.
+    Time to exhaustion (observed TTE): current value, recent direction, and a weekly sparkline.
     'What's improving, what's stale.' Deterministic; the React component renders only."""
     _require_loaded()
-    import pandas as pd
     m = _S.get("m")
     if m is None:
         return {"systems": []}
-    daily = m.daily
-    DEFS = [("mftp_w", "Threshold", "mFTP", "W"),
-            ("pvo2max_w", "Aerobic power", "pVO2max", "W"),
-            ("pmax_w", "Sprint", "Pmax", "W"),
-            ("tte_sec", "Threshold hold", "TTE", "min")]
+    reads = wm_trend.systems_read(m, _S["as_of"])          # shared with the dashboard narrative
+    LABELS = {"mftp_w": ("Threshold", "mFTP"), "pvo2max_w": ("Aerobic power", "pVO2max"),
+              "pmax_w": ("Sprint", "Pmax"), "tte_sec": ("Time to exhaustion", "TTE")}
     out = []
-    for col, label, sub, unit in DEFS:
-        if col not in daily.columns:
-            continue
-        s = pd.to_numeric(daily[col], errors="coerce").dropna()
-        if s.empty:
-            continue
-        s.index = pd.to_datetime(s.index)
-        ao = s.index.max()
-        spark = [round(float(v), 2) for v in s.resample("W").last().dropna().tail(40)]
-        cur = float(s.iloc[-1])
-        recent = s[s.index > ao - pd.Timedelta(days=28)].mean()
-        prior = s[(s.index <= ao - pd.Timedelta(days=28)) & (s.index > ao - pd.Timedelta(days=84))].mean()
-        chg = (recent - prior) / prior * 100 if (prior and pd.notna(prior) and prior > 0) else 0.0
-        direction = "rising" if chg > 2 else "falling" if chg < -2 else "flat"
-        value = round(cur / 60, 1) if unit == "min" else round(cur)
-        out.append({"key": col, "label": label, "sub": sub, "unit": unit,
-                    "value": value, "dir": direction, "delta_pct": round(chg, 1), "spark": spark})
+    for col, (label, sub) in LABELS.items():
+        r = reads.get(col)
+        if r:
+            out.append({"key": col, "label": label, "sub": sub, **r})
     return {"systems": out}
 
 
@@ -609,7 +614,8 @@ def coach_dashboard(as_of: str = Query(None)):
     watch = select(_S["findings"], ao, _S["m"])          # active alert/watch for this date
     hero = wm_trend._hero(_S["m"], ao, _S.get("plan"), watch["status"])
     prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
-    card = plan_review.coach_card(hero, prog, watch=watch)
+    systems = wm_trend.systems_read(_S["m"], ao)          # per-system PD reads for the narrative
+    card = plan_review.coach_card(hero, prog, watch=watch, systems=systems)
     # Polish the grounded paragraph groups into a coherent multi-paragraph read (cached per state;
     # deterministic fallback so the card renders even with no model/key). The UI prefers `prose`,
     # keeps `narrative` as the fallback array.

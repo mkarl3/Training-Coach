@@ -18,13 +18,13 @@ from __future__ import annotations
 import datetime as dt
 
 from . import pd_model
-from . import pull_history          # load_streams() for the observed-TTE (threshold-hold) metric
+from . import pull_history          # load_streams() for the observed-TTE metric
 
 # Observed Time-to-Exhaustion = longest block actually held at/near threshold (vs the WKO-modeled TTE
 # we could not reproduce). Emitted into the existing `tte_sec` column.
 TTE_FRAC = 0.90                     # longest block held at >= this x mFTP
 TTE_ROLL = 30                     # seconds: rolling-avg window so brief dips don't end the block
-TTE_WINDOW_DAYS = 90             # rolling window for "longest threshold hold recently"
+TTE_WINDOW_DAYS = 90             # rolling window for the longest qualifying block (observed TTE)
 
 CTL_TC, ATL_TC = 42.0, 7.0
 CP_WINDOW_DAYS = 90
@@ -230,7 +230,7 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
     if not by:
         return []
     resolve = _ftp_resolver(load_ftp, cp_at, fb)
-    day_block = _day_threshold_blocks(by, cp_at)      # raw-stream observed-TTE (threshold-hold) per ride-day
+    day_block = _day_threshold_blocks(by, cp_at)      # raw-stream observed-TTE per ride-day
     ctl = atl = None
     rows = []
     for d in _drange(start, end):

@@ -48,3 +48,41 @@ def test_pmc_directions_are_signed(m, as_of):
     ctl = b["pmc"]["ctl"]
     if ctl["delta_7d"] is not None:
         assert ctl["dir_7d"] in ("up", "down", "flat")
+
+
+_SYS = {
+    "pmax_w": {"value": 584, "unit": "W", "dir": "falling", "delta_pct": -10.3},
+    "tte_sec": {"value": 19.7, "unit": "min", "dir": "rising", "delta_pct": 19.0},
+    "mftp_w": {"value": 185, "unit": "W", "dir": "falling", "delta_pct": -3.2},
+}
+
+
+def test_systems_sentence_suppresses_offfocus_decline_but_shows_notable_rise():
+    # Prep has no PD focus -> the falling Pmax/mFTP are the expected cost of base work (suppressed),
+    # but TTE's notable rise is a real surprise and surfaces — as a `notable` aside (with the
+    # where-you-stand read), NOT as block-relevant evidence.
+    prep = review._systems_lines("Prep", _SYS)
+    assert prep["relevant"] is None
+    assert "Pmax" not in prep["notable"] and "TTE" in prep["notable"]
+
+
+def test_systems_sentence_speaks_block_focus_with_actionable_fix():
+    # Base 3 focus = mFTP & TTE -> both spoken as `relevant`; the sliding (focus) mFTP gets a tail.
+    b3 = review._systems_lines("Base 3", _SYS)["relevant"]
+    assert "TTE" in b3 and "185 W" in b3 and "duration work will lift it" in b3
+    assert "Pmax" not in b3                         # off-focus + falling -> still suppressed
+
+
+_QUIET = {
+    "pmax_w": {"value": 584, "unit": "W", "dir": "falling", "delta_pct": -10.3},
+    "tte_sec": {"value": 19.7, "unit": "min", "dir": "flat", "delta_pct": 1.0},
+    "mftp_w": {"value": 185, "unit": "W", "dir": "falling", "delta_pct": -3.2},
+}
+
+
+def test_systems_sentence_none_when_nothing_to_say():
+    none = review._systems_lines("Base 3", None)
+    assert none["relevant"] is None and none["notable"] is None
+    # Race/taper: no focus systems, and the only movers are off-focus declines -> stays silent
+    race = review._systems_lines("Race", _QUIET)
+    assert race["relevant"] is None and race["notable"] is None

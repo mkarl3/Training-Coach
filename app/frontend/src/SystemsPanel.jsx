@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 
-// "Your systems" — per-system trend small-multiples (Threshold / Aerobic power / Sprint / Threshold
-// hold). Each card shows the current value, recent direction, and a weekly sparkline. The backend
-// (/api/systems) computes every number (THE ONE RULE); this only renders.
+// "Your systems" — per-system trend small-multiples (Threshold / Aerobic power / Sprint / Time to
+// exhaustion). Each card shows the current value, recent direction, and a weekly sparkline. The
+// backend (/api/systems) computes every number (THE ONE RULE); this only renders.
 
 const DIR = {
   rising: { a: "↑", c: "var(--green)" },
