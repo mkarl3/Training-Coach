@@ -18,6 +18,13 @@ from __future__ import annotations
 import datetime as dt
 
 from . import pd_model
+from . import pull_history          # load_streams() for the observed-TTE (threshold-hold) metric
+
+# Observed Time-to-Exhaustion = longest block actually held at/near threshold (vs the WKO-modeled TTE
+# we could not reproduce). Emitted into the existing `tte_sec` column.
+TTE_FRAC = 0.90                     # longest block held at >= this x mFTP
+TTE_ROLL = 30                     # seconds: rolling-avg window so brief dips don't end the block
+TTE_WINDOW_DAYS = 90             # rolling window for "longest threshold hold recently"
 
 CTL_TC, ATL_TC = 42.0, 7.0
 CP_WINDOW_DAYS = 90
@@ -124,6 +131,50 @@ def _ride_tss(ride, ftp):
     return (ride["duration_s"] / 3600) * if_ ** 2 * 100, if_
 
 
+def longest_threshold_block(watts, thr_w, roll=TTE_ROLL):
+    """Longest sustained block (sec, ~1 Hz) whose trailing `roll`-second rolling average stays at or
+    above `thr_w` — observed threshold durability, dip-tolerant via the rolling window. 0 if none."""
+    if not watts or thr_w <= 0:
+        return 0
+    w = [x or 0 for x in watts]
+    n = len(w)
+    if n < roll:
+        return 0
+    cs = [0.0]
+    for x in w:
+        cs.append(cs[-1] + x)
+    best = cur = 0
+    for i in range(roll - 1, n):
+        if (cs[i + 1] - cs[i + 1 - roll]) / roll >= thr_w:
+            cur += 1
+            if cur > best:
+                best = cur
+        else:
+            cur = 0
+    return best
+
+
+def _day_threshold_blocks(by, cp_at):
+    """Per ride-day, the longest >=TTE_FRAC*mFTP block across that day's rides (loads raw streams)."""
+    out = {}
+    for d, rides in by.items():
+        ftp_m = cp_at.get(d)
+        if not ftp_m:
+            continue
+        thr = TTE_FRAC * ftp_m
+        best = 0
+        for r in rides:
+            sid = r.get("id")
+            st = pull_history.load_streams(sid) if sid else None
+            if st and st.get("watts"):
+                b = longest_threshold_block(st["watts"], thr)
+                if b > best:
+                    best = b
+        if best:
+            out[d] = best
+    return out
+
+
 def _ftp_asof(hist, d, fallback):
     """The set FTP effective on date `d`: the latest entry with date <= d; if d precedes all
     entries, the earliest entry (back-fill); `fallback` when the history is empty."""
@@ -179,6 +230,7 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
     if not by:
         return []
     resolve = _ftp_resolver(load_ftp, cp_at, fb)
+    day_block = _day_threshold_blocks(by, cp_at)      # raw-stream observed-TTE (threshold-hold) per ride-day
     ctl = atl = None
     rows = []
     for d in _drange(start, end):
@@ -197,6 +249,8 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
         ctl = _ewma(ctl, tss, CTL_TC)
         atl = _ewma(atl, tss, ATL_TC)
         cp = cp_at.get(d)
+        lo90 = (dt.date.fromisoformat(d) - dt.timedelta(days=TTE_WINDOW_DAYS)).isoformat()
+        tte = max((v for dd, v in day_block.items() if lo90 <= dd <= d), default=0)  # longest recent hold
         row = {
             "date": d, "year": int(d[:4]), "is_projected": 0,
             "has_ride": 1 if rides else 0, "num_workouts": len(rides),
@@ -208,7 +262,7 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
             "frc_kj": round(wprime_at[d] / 1000, 1) if wprime_at[d] else None,
             "pmax_w": round(pmax_at[d]) if pmax_at[d] else None,
             "pvo2max_w": round(pvo2_at[d]) if pvo2_at.get(d) else None,   # modeled 5-min (curve)
-            "tte_sec": None,
+            "tte_sec": tte or None,        # observed TTE: longest >=90% mFTP block held, last 90d
         }
         for zi in range(6):                               # tiz_pwr_z1_sec .. z6_sec
             row[f"tiz_pwr_z{zi + 1}_sec"] = int(tiz[zi]) if rides else None

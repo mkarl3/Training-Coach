@@ -262,6 +262,42 @@ def consistency(as_of: str = Query(None)):
     return consistency_gauge(_S["findings"], as_of or _S["as_of"], _S["m"])
 
 
+@app.get("/api/systems")
+def systems():
+    """Per-system trend readout — Threshold (mFTP), Aerobic power (pVO2max), Sprint (Pmax), and
+    Threshold hold (observed TTE): current value, recent direction, and a weekly sparkline.
+    'What's improving, what's stale.' Deterministic; the React component renders only."""
+    _require_loaded()
+    import pandas as pd
+    m = _S.get("m")
+    if m is None:
+        return {"systems": []}
+    daily = m.daily
+    DEFS = [("mftp_w", "Threshold", "mFTP", "W"),
+            ("pvo2max_w", "Aerobic power", "pVO2max", "W"),
+            ("pmax_w", "Sprint", "Pmax", "W"),
+            ("tte_sec", "Threshold hold", "TTE", "min")]
+    out = []
+    for col, label, sub, unit in DEFS:
+        if col not in daily.columns:
+            continue
+        s = pd.to_numeric(daily[col], errors="coerce").dropna()
+        if s.empty:
+            continue
+        s.index = pd.to_datetime(s.index)
+        ao = s.index.max()
+        spark = [round(float(v), 2) for v in s.resample("W").last().dropna().tail(40)]
+        cur = float(s.iloc[-1])
+        recent = s[s.index > ao - pd.Timedelta(days=28)].mean()
+        prior = s[(s.index <= ao - pd.Timedelta(days=28)) & (s.index > ao - pd.Timedelta(days=84))].mean()
+        chg = (recent - prior) / prior * 100 if (prior and pd.notna(prior) and prior > 0) else 0.0
+        direction = "rising" if chg > 2 else "falling" if chg < -2 else "flat"
+        value = round(cur / 60, 1) if unit == "min" else round(cur)
+        out.append({"key": col, "label": label, "sub": sub, "unit": unit,
+                    "value": value, "dir": direction, "delta_pct": round(chg, 1), "spark": spark})
+    return {"systems": out}
+
+
 @app.get("/api/trend")
 def trend(as_of: str = Query(None)):
     """Long-range fitness-trend payload for the integrated dashboard: weekly CTL+TSS series, the

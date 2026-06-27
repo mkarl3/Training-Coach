@@ -69,7 +69,7 @@ CREATE TABLE daily (
     frc_kj          REAL,
     pmax_w          REAL,
     pvo2max_w       REAL,                     -- modeled power at VO2max (Om3CP curve @5min); Strava pipeline only
-    tte_sec         INTEGER,
+    tte_sec         INTEGER,                  -- observed TTE: longest >=90% mFTP block held, last 90d (Strava)
 
     -- Wellness / body (from PMC intraday rows; sparse, nullable; absent in older years -> NULL).
     weight_lb       REAL,

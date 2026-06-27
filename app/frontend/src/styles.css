@@ -203,6 +203,17 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-i
 .ftp-notice-actions .notice-x { background: none; border: 0; color: var(--ink-3); font-size: 18px; line-height: 1; cursor: pointer; padding: 0 4px; }
 .ftp-notice-actions .notice-x:hover { color: var(--red); }
 
+/* "Your systems" — per-system trend small-multiples (Watchman) */
+.systems-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
+.sys-card { background: var(--panel-3); border-top: 3px solid var(--ink-2); padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 7px; border-radius: 4px; }
+.sys-top { display: flex; flex-direction: column; gap: 1px; }
+.sys-label { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; color: var(--cream); }
+.sys-sub { font-size: 10.5px; color: var(--ink-3); }
+.sys-val { font-family: var(--ui); font-weight: 800; font-size: 22px; color: var(--cream); display: flex; align-items: baseline; gap: 4px; line-height: 1; }
+.sys-unit { font-size: 12px; color: var(--ink-2); font-weight: 700; }
+.sys-dir { margin-left: auto; font-size: 12px; font-weight: 800; align-self: center; }
+@media (max-width: 720px) { .systems-grid { grid-template-columns: repeat(2, 1fr); } }
+
 /* ============================ COACH — bottom Wattson bar + drawer ============================ */
 .coachbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; display: flex; align-items: stretch;
   width: 100%; text-align: left; background: var(--panel); border: 0; cursor: pointer; padding: 0;
