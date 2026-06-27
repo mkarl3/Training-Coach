@@ -356,21 +356,18 @@ class Metrics:
 
     # --- Slice 5 phase-progression helpers ---
     def fractional_utilization(self, as_of=None, window_days=42):
-        """mFTP as a % of power-at-VO2max (proxied by best recent 5-min power) — the sourced
-        Base->Build gate. None when there's no recent 5-min effort to anchor it."""
+        """mFTP as a % of modeled power-at-VO2max (curve-modeled 5-min power, daily `pvo2max_w` from
+        the Om3CP fit — validated to match WKO's mFTP%VO2max, ~84%). The sourced Base->Build gate.
+        None when the metrics aren't available (e.g. a DB built before pvo2max_w existed). The
+        "is there a fresh max effort" check lives separately in band_staleness('vo2', observed)."""
         ao = pd.Timestamp(as_of) if as_of else self.daily.index.max()
-        w = self.workouts.copy()
-        w["_d"] = pd.to_datetime(w["date"])
-        seg = w[(w["_d"] <= ao) & (w["_d"] > ao - pd.Timedelta(days=window_days))]
-        p5 = pd.to_numeric(seg["p5min_w"], errors="coerce").dropna()
-        if p5.empty:
-            return None
-        vo2 = float(p5.max())
         ftp = float(self.mftp.asof(ao))
-        if not np.isfinite(ftp) or vo2 <= 0:
+        pv = self.daily["pvo2max_w"].asof(ao) if "pvo2max_w" in self.daily.columns else None
+        vo2 = float(pv) if pv is not None and pd.notna(pv) else None
+        if vo2 is None or vo2 <= 0 or not np.isfinite(ftp):
             return None
         return {"pct": round(100.0 * ftp / vo2, 1), "mftp": round(ftp), "vo2_power": round(vo2),
-                "vo2_date": seg.loc[p5.idxmax(), "_d"].strftime("%Y-%m-%d")}
+                "vo2_date": ao.strftime("%Y-%m-%d")}
 
     # which per-ride power column anchors each duration band (for staleness)
     _BAND_COL = {"short": "p5s_w", "medium": "p1min_w", "vo2": "p5min_w", "long": "p20min_w"}

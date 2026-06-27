@@ -85,38 +85,38 @@ _OFFSET_SAMPLE = 10            # fit the free (anchor) curve every Nth ride-day,
 
 
 def _series(summaries):
-    """Shared pass: per-date modeled mFTP + legacy 2-pt W' + observed Pmax, carried over ride-less
-    days. mFTP = the pinned+threshold-weighted Om3CP fit (stable, WKO-tracking; pd_model.fit_cp),
-    re-anchored in LEVEL by a self-derived offset = mean(free_fit − pinned_fit) — the free fit is
-    ~unbiased in level, the pinned fit is stable in shape, so we get both. Refit only on ride days
-    (CP is slow-moving). Returns (by_date, start, end, cp_at, wprime_at, pmax_at, ftp_fallback)."""
+    """Shared pass: per-date modeled mFTP + modeled pVO2max + legacy 2-pt W' + observed Pmax, carried
+    over ride-less days. One pd_model.fit() per ride day yields CP (mFTP shape) AND pVO2max (modeled
+    5-min). mFTP is re-anchored in LEVEL by a self-derived offset = mean(free_fit − pinned_fit) — the
+    free fit is ~unbiased in level, the pinned fit is stable in shape. Refit only on ride days.
+    Returns (by_date, start, end, cp_at, pvo2_at, wprime_at, pmax_at, ftp_fallback)."""
     by = rides_by_date(summaries)
     if not by:
-        return {}, None, None, {}, {}, {}, 180.0
+        return {}, None, None, {}, {}, {}, {}, 180.0
     start, end = min(by), max(by)
-    pin_at, wprime_at, pmax_at = {}, {}, {}
-    last_pin = last_wp = None
+    pin_at, pvo2_at, wprime_at, pmax_at = {}, {}, {}, {}
+    last_pin = last_pvo2 = last_wp = None
     gaps, ride_i = [], 0
     for d in _drange(start, end):
         if d in by:                                       # new data in the window → refit
             env = _rolling_envelope(by, CP_WINDOW_DAYS, d)
-            cp = pd_model.fit_cp(env)                     # pinned + weighted (stable shape, reads low)
+            prod = pd_model.fit(env)                      # one fit → CP (mFTP shape) + modeled pVO2max
             _, wp = _cp_wprime(env.get(W_SHORT), env.get(W_LONG))   # legacy W' (low-confidence FRC)
-            if cp:
-                last_pin = cp
+            if prod:
+                last_pin, last_pvo2 = prod["cp"], prod["pvo2max"]
                 if ride_i % _OFFSET_SAMPLE == 0:          # sample the free fit for the level anchor
                     free = pd_model.fit_cp_free(env)
                     if free:
-                        gaps.append(free - cp)
+                        gaps.append(free - prod["cp"])
                 ride_i += 1
             if wp:
                 last_wp = wp
-        pin_at[d], wprime_at[d] = last_pin, last_wp
+        pin_at[d], pvo2_at[d], wprime_at[d] = last_pin, last_pvo2, last_wp
         pmax_at[d] = _rolling_best(by, "5", CP_WINDOW_DAYS, d)
     offset = round(sum(gaps) / len(gaps), 1) if gaps else 0.0   # self-anchored level (no WKO, no set-FTP)
     cp_at = {d: (round(v + offset, 1) if v is not None else None) for d, v in pin_at.items()}
     ftp_fallback = next((v for v in cp_at.values() if v), 180.0)
-    return by, start, end, cp_at, wprime_at, pmax_at, ftp_fallback
+    return by, start, end, cp_at, pvo2_at, wprime_at, pmax_at, ftp_fallback
 
 
 def _ride_tss(ride, ftp):
@@ -175,7 +175,7 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
 
     load_ftp may also be a dated HISTORY (list of {date, ftp}); then each ride is scored with the
     set FTP that was in effect on its date — see _ftp_resolver."""
-    by, start, end, cp_at, wprime_at, pmax_at, fb = _series(summaries)
+    by, start, end, cp_at, pvo2_at, wprime_at, pmax_at, fb = _series(summaries)
     if not by:
         return []
     resolve = _ftp_resolver(load_ftp, cp_at, fb)
@@ -207,6 +207,7 @@ def build_daily(summaries: list[dict], load_ftp: float | None = None) -> list[di
             "mftp_w": round(cp) if cp else None,
             "frc_kj": round(wprime_at[d] / 1000, 1) if wprime_at[d] else None,
             "pmax_w": round(pmax_at[d]) if pmax_at[d] else None,
+            "pvo2max_w": round(pvo2_at[d]) if pvo2_at.get(d) else None,   # modeled 5-min (curve)
             "tte_sec": None,
         }
         for zi in range(6):                               # tiz_pwr_z1_sec .. z6_sec
@@ -219,7 +220,7 @@ def build_workouts(summaries: list[dict], load_ftp: float | None = None) -> list
     """Per-ride rows shaped for the app's `workout` table (TSS/IF/NP + PD points), FTP-consistent
     with build_daily (load_ftp = the athlete's set threshold FTP for TSS/IF). EF / decoupling /
     VI / TIS / HR fields deferred → None."""
-    by, start, end, cp_at, _wp, _pm, fb = _series(summaries)
+    by, start, end, cp_at, _pv, _wp, _pm, fb = _series(summaries)
     resolve = _ftp_resolver(load_ftp, cp_at, fb)
     rows = []
     for d in sorted(by):

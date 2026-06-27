@@ -24,18 +24,20 @@ def test_fit_cp_free_recovers_known_cp():
     assert cp is not None and abs(cp - 210) < 5        # free fit recovers the planted CP
 
 
-def test_fit_cp_pinned_is_plausible_and_lower():
-    # production fit pins Pmax to the 5 s value (≠ the curve's true t→0 Pmax), so it reads LOWER —
-    # by design; metrics._series anchors the level back with the free-vs-pinned offset.
+def test_fit_returns_cp_and_pvo2max():
+    # production fit yields both metrics from one fit. cp pins Pmax to the 5 s value (≠ the curve's
+    # true t→0 Pmax) so it reads LOWER than the free fit — by design; _series anchors the level back.
+    # pVO2max (modeled 5-min power) sits ABOVE cp (5-min power > threshold).
     mmp = _synthetic_curve(cp=210, w=16000, pmax=950, cpttf=2400, a=8)
-    pin = pd_model.fit_cp(mmp); free = pd_model.fit_cp_free(mmp)
-    assert pin is not None and 60 < pin < 400
-    assert pin < free                                   # pinning shifts CP down (the offset closes it)
+    out = pd_model.fit(mmp); free = pd_model.fit_cp_free(mmp)
+    assert out is not None and 60 < out["cp"] < 400
+    assert out["cp"] < free                              # pinning shifts CP down (the offset closes it)
+    assert out["pvo2max"] > out["cp"]                    # 5-min power is above threshold
 
 
-def test_fit_cp_none_when_too_few_points():
-    assert pd_model.fit_cp({"180": 250, "720": 210}) is None   # < min points + no 5 s anchor
-    assert pd_model.fit_cp({}) is None
+def test_fit_none_when_too_few_points():
+    assert pd_model.fit({"180": 250, "720": 210}) is None   # < min points + no 5 s anchor
+    assert pd_model.fit({}) is None
     assert pd_model.fit_cp_free({}) is None
 
 
