@@ -490,6 +490,12 @@ export default function CheckIn({ meta, onClose, onPlanChanged }) {
                     </div>
                   )}
                   {nw?.focus && <div className="ci-focus">FOCUS — {nw.focus}.{nw.field_test ? " ⚑ Field test this week." : ""}</div>}
+                  {b?.refresh && (
+                    <div className="ci-refresh">
+                      <span className="ci-refresh-tag">⚡ KEEP THE ANALYSIS FRESH</span>
+                      <p>{say(b.refresh.sentence)}</p>
+                    </div>
+                  )}
                 </>
               ) : (
                 <Beat birthday={bday} mood="calm"><p>No weekly plan to brief — set up a season to get a mission here.</p></Beat>

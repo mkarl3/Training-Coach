@@ -65,7 +65,7 @@ function Strip({ history, weeks }) {
 }
 
 // ---------------------------------------------------------------- this week
-function ThisWeek({ w, isCurrent }) {
+function ThisWeek({ w, isCurrent, refresh }) {
   const col = FAM[w.family];
   const sb = (l, v) => (
     <div key={l}><div className="cal-sblab">{l}</div><div className="cal-sbval">{v}</div></div>
@@ -81,6 +81,12 @@ function ThisWeek({ w, isCurrent }) {
         <div className="cal-tw-tss"><div className="v">{w.weekly_tss_target}</div><div className="l">TSS this week</div></div>
       </div>
       <div className="cal-tw-focus">{w.focus}.</div>
+      {isCurrent && refresh && (
+        <div className="cal-tw-refresh">
+          <span className="cal-tw-refresh-tag">⚡ Keep the analysis fresh</span>
+          <span>{refresh.sentence}</span>
+        </div>
+      )}
       <div className="cal-tw-stats">
         {sb("Long ride", w.long_ride_hours ? w.long_ride_hours + " h" : "—")}
         {sb("Single-ride cap", "≤" + w.single_ride_tss_cap + " TSS")}
@@ -378,7 +384,7 @@ export default function Calendar() {
               fitness ~{m.peak_ctl_achieved}, short of the {m.target_peak_ctl} target. More time or hours
               would close it — the plan won't pretend otherwise.</div>
           )}
-          <ThisWeek w={cur} isCurrent={cur.status === "current"} />
+          <ThisWeek w={cur} isCurrent={cur.status === "current"} refresh={plan.refresh} />
           <div className="cal-blocks-head pix"><span className="tick" />BLOCKS</div>
           <div className="cal-blocks-hint">tap a block, then a week</div>
           <Blocks weeks={plan.weeks} />

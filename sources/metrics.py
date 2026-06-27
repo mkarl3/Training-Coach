@@ -30,6 +30,110 @@ CTL_TC, ATL_TC = 42.0, 7.0
 CP_WINDOW_DAYS = 90
 W_SHORT, W_LONG = "180", "720"          # 3-min & 12-min bests for the 2-point CP/W′ model
 
+# --- System data-freshness / confidence -------------------------------------------------------------
+# A modeled system is only as trustworthy as the last time the athlete actually rode efforts in its
+# part of the power-duration curve. For each system we find the most recent ride that "informs" it (an
+# effort within FRESH_FRAC of the rolling best at any of its anchor durations) and age it. Tiers
+# (user-approved): fresh <= 21d, aging <= 42d, stale > 42d. Beyond the 90d fit window the value is pure
+# extrapolation, so a stale system's *direction* is not to be trusted (don't read a "drop" as real).
+FRESH_FRAC = 0.95
+FRESH_DAYS, AGING_DAYS = 21, 42
+SYSTEM_ANCHORS = {                      # MMP duration keys (s) that define each system on the curve
+    "pmax_w":    ("5",),                                    # a near-max sprint
+    "pvo2max_w": ("180", "300", "600"),                    # a hard 3–10 min effort
+    "mftp_w":    ("300", "600", "720", "900", "1200", "1800"),   # a sustained threshold effort
+    "tte_sec":   ("1200", "1800", "2700", "3600"),         # a long near-threshold effort
+}
+
+
+def _last_informing_effort(by, anchors, asof, days=CP_WINDOW_DAYS, frac=FRESH_FRAC):
+    """ISO date of the most recent ride (<= asof, within `days`) that hit >= `frac` of the rolling best
+    at ANY of the system's anchor durations — i.e. the last time the athlete demonstrated this system.
+    None if nothing in the window informs it."""
+    best = {k: v for k in anchors if (v := _rolling_best(by, k, days, asof))}
+    if not best:
+        return None
+    lo = (dt.date.fromisoformat(asof) - dt.timedelta(days=days)).isoformat()
+    latest = None
+    for d, rides in by.items():
+        if not (lo <= d <= asof) or (latest is not None and d <= latest):
+            continue
+        for r in rides:
+            if r.get("device_watts") is False:
+                continue
+            mmp = r.get("mmp") or {}
+            if any((mmp.get(k) or 0) >= frac * b for k, b in best.items()):
+                latest = d
+                break
+    return latest
+
+
+def systems_freshness(summaries, asof):
+    """Per-system data freshness as of `asof`: {col: {last_effort_date, days_since, confidence}} with
+    confidence in {fresh, aging, stale, none}. Single source for the panel cue and the narrative
+    hedging, so the two never disagree. Pure / deterministic."""
+    asof = asof[:10]
+    by = rides_by_date(summaries)
+    out = {}
+    for col, anchors in SYSTEM_ANCHORS.items():
+        last = _last_informing_effort(by, anchors, asof) if by else None
+        if last is None:
+            out[col] = {"last_effort_date": None, "days_since": None, "confidence": "none"}
+            continue
+        ds = (dt.date.fromisoformat(asof) - dt.date.fromisoformat(last)).days
+        conf = "fresh" if ds <= FRESH_DAYS else "aging" if ds <= AGING_DAYS else "stale"
+        out[col] = {"last_effort_date": last, "days_since": ds, "confidence": conf}
+    return out
+
+
+# --- Refresh prescription ("go test this") ----------------------------------------------------------
+# When a system is aging, Wattson can prescribe the exact effort to refresh it: a representative
+# duration + a target wattage range grounded in the athlete's own efforts — floor = recent 90-day best
+# at that duration (what you've shown lately), stretch = 12-month best (your proven ceiling). Both are
+# real observed numbers (THE ONE RULE); the stretch only shows when it's meaningfully above the floor.
+REFRESH_CEIL_DAYS = 365
+_ALLTIME_DAYS = 100000      # effectively all cached history — for the Pmax "go beat your PB" benchmark
+STRETCH_MIN_PCT = 2.0       # the model stretch must beat the recent best by this much (no hollow stretch)
+# Where the stretch (top of the range) comes from, per system:
+#   "model" — the Om3CP curve's FORWARD prediction at that duration (a true stretch inferred from the
+#             athlete's OTHER current efforts). Used for the aerobic systems.
+#   "peak"  — the athlete's 12-month best. Used for Pmax, whose curve value is PINNED to the observed
+#             5 s best (so the model can't predict a sprint above it; sprint power isn't curve-derivable).
+SYSTEM_TARGETS = {          # col -> representative effort to re-demonstrate the system
+    "mftp_w":    {"dur": "1200", "label": "20-minute effort",          "effort": "threshold effort", "stretch": "model"},
+    "pvo2max_w": {"dur": "300",  "label": "5-minute effort",           "effort": "VO2 effort",       "stretch": "model"},
+    "pmax_w":    {"dur": "5",    "label": "few all-out sprints",        "effort": "sprint",           "stretch": "peak"},
+    "tte_sec":   {"dur": "1800", "label": "long threshold block (30+ min)", "effort": "long threshold effort", "stretch": "model"},
+}
+
+
+def refresh_target(summaries, asof, col):
+    """The effort that would refresh system `col`: {dur, label, effort, floor_w, stretch_w, stretch_kind}.
+    floor_w = recent 90-day best at the anchor duration. stretch_w = a forward target above it, sourced
+    per SYSTEM_TARGETS — the Om3CP curve prediction (aerobic) or the 12-month peak (Pmax) — only when it
+    beats the floor by >= STRETCH_MIN_PCT (else None: no hollow stretch). None if there's no usable best."""
+    spec = SYSTEM_TARGETS.get(col)
+    if not spec:
+        return None
+    asof = asof[:10]
+    by = rides_by_date(summaries)
+    if not by:
+        return None
+    floor = _rolling_best(by, spec["dur"], CP_WINDOW_DAYS, asof)
+    if not floor:
+        return None
+    stretch, kind = None, None
+    if spec["stretch"] == "model":
+        pred = pd_model.predict(_rolling_envelope(by, CP_WINDOW_DAYS, asof), int(spec["dur"]))
+        if pred and pred >= floor * (1 + STRETCH_MIN_PCT / 100):
+            stretch, kind = round(pred), "model"
+    else:                                                  # "peak" — an all-out effort: benchmark vs the
+        pb = _rolling_best(by, spec["dur"], _ALLTIME_DAYS, asof)   # all-time PB (within our data horizon)
+        if pb:
+            stretch, kind = round(pb), "peak"             # no target to 'hit'; copy says "go beat it"
+    return {"dur": spec["dur"], "label": spec["label"], "effort": spec["effort"],
+            "floor_w": round(floor), "stretch_w": stretch, "stretch_kind": kind}
+
 
 def _drange(a: str, b: str):
     d, end = dt.date.fromisoformat(a), dt.date.fromisoformat(b)

@@ -237,28 +237,48 @@ _SYS_MAX_LINES = 2          # keep the read tight — at most this many systems 
 
 # Grounded clauses (lowercase; assembled into one sentence). `fix` is appended for a block-relevant
 # system that's sliding — names the work that brings it back (Wattson voice: direct + actionable).
+# `stale` is used INSTEAD of the direction clause when the data behind a system is old: it states the
+# value, names the missing effort, and explicitly tells the athlete not to read the direction as real.
 _SYS_COPY = {
     "mftp_w":   {"rising": "your threshold is climbing — mFTP up to {v} W",
                  "falling": "your threshold's eased back to {v} W",
                  "flat": "your threshold's holding at {v} W",
-                 "fix": " — the duration work will lift it"},
+                 "fix": " — the duration work will lift it",
+                 "stale": "your threshold reads {v} W, but I haven't seen a hard sustained effort from "
+                          "you in {ago} — read that loosely, not as a real move"},
     "pvo2max_w": {"rising": "your aerobic power is responding — pVO2max at {v} W",
                   "falling": "your aerobic power's slipped to {v} W",
                   "flat": "your aerobic power's steady at {v} W",
-                  "fix": " — the VO2 work needs to land"},
+                  "fix": " — the VO2 work needs to land",
+                  "stale": "your aerobic power reads {v} W, but it's been {ago} since a real VO2 effort, "
+                           "so don't read much into the number"},
     "pmax_w":   {"rising": "your top-end's sharpening — Pmax up to {v} W",
                  "falling": "your top-end's gone soft — Pmax down to {v} W",
                  "flat": "your top-end's holding at {v} W",
-                 "fix": " — time for some sprints"},
+                 "fix": " — time for some sprints",
+                 "stale": "your top-end reads {v} W, but I haven't seen a full sprint in {ago} — that's "
+                          "stale data, not a real drop"},
     "tte_sec":  {"rising": "your TTE is stretching out to {v} min",
                  "falling": "your TTE's slipped to {v} min",
                  "flat": "your TTE's steady at {v} min",
-                 "fix": " — get some longer threshold blocks in"},
+                 "fix": " — get some longer threshold blocks in",
+                 "stale": "your TTE reads {v} min, but it's been {ago} since a long threshold effort, so "
+                          "take it with a grain of salt"},
 }
+
+
+def _ago(days):
+    """Human gap for the staleness hedge: '5 weeks', 'a week', 'a while' (unknown)."""
+    if not days:
+        return "a while"
+    wk = round(days / 7)
+    return "a week" if wk <= 1 else f"{wk} weeks"
 
 
 def _sys_clause(col, s, relevant):
     copy = _SYS_COPY[col]
+    if s.get("confidence") == "stale":                    # old data → hedge, never assert a direction
+        return copy["stale"].format(v=s["value"], ago=_ago(s.get("days_since")))
     c = copy[s["dir"]].format(v=s["value"])
     if relevant and s["dir"] == "falling":
         c += copy.get("fix", "")
@@ -283,17 +303,60 @@ def _systems_lines(block, systems):
       • `notable`  — an off-focus system that ROSE notably (a real, positive surprise). This is a
         by-the-way about current form, so it reads with the where-you-stand brief, not the plan.
     An off-focus DECLINE is the expected cost of training something else (e.g. Pmax fading in Prep),
-    so it stays silent. Either sentence may be None."""
+    so it stays silent. A notable RISE on STALE data is not a real surprise (the model is just
+    extrapolating), so it's suppressed too. Either sentence may be None."""
     if not systems:
         return {"relevant": None, "notable": None}
     relevant = _BLOCK_SYSTEMS.get(block, ())
     rel = sorted((c for c in relevant if c in systems),
                  key=lambda c: -abs(systems[c]["delta_pct"]))[:_SYS_MAX_LINES]
     notable = sorted((c for c, s in systems.items()
-                      if c not in relevant and s["dir"] == "rising" and s["delta_pct"] >= _SYS_NOTABLE_PCT),
+                      if c not in relevant and s["dir"] == "rising"
+                      and s["delta_pct"] >= _SYS_NOTABLE_PCT and s.get("confidence") != "stale"),
                      key=lambda c: -systems[c]["delta_pct"])[:1]   # one aside, kept tight
     return {"relevant": _join_clauses([(c, True) for c in rel], systems),
             "notable": _join_clauses([(c, False) for c in notable], systems)}
+
+
+def relevant_systems(block):
+    """The modeled systems that matter for `block` (its focus). Exposed so the app layer can decide
+    which aging systems are worth prescribing a refresh effort for, without duplicating the map."""
+    return _BLOCK_SYSTEMS.get(block, ())
+
+
+def _refresh_copy(t, ago):
+    """The prescription sentence. A `peak` (all-out) effort has no target to hit — just beat the PB. A
+    `model` stretch is a forward target range ('the top end's in you'). No stretch → 'confirm it'."""
+    if t.get("stretch_kind") == "peak":                   # sprints are all-out — no watt target, beat the PB
+        pb = f" — your PB is {t['stretch_w']} W, go beat it." if t.get("stretch_w") else " and let's see where it's at."
+        return (f"I haven't seen a max {t['effort']} from you in {ago}. Tack a few all-out efforts onto "
+                f"the end of a ride this week{pb}")
+    lead = f"I haven't seen a solid {t['effort']} from you in {ago}. Give me a {t['label']} this week"
+    if t.get("stretch_w") and t.get("stretch_kind") == "model":
+        return f"{lead} — aim between {t['floor_w']} and {t['stretch_w']} W. I think the top end's in you."
+    return f"{lead} — you've held {t['floor_w']} W there before, let's confirm it."
+
+
+def refresh_prescription(systems, targets):
+    """The 'go test this' prescription for the block-relevant system that's gone quiet, as a structured
+    dict (system/effort/label/floor_w/stretch_w/stretch_kind/days_since/weeks/sentence) or None.
+    `targets` is already limited by the caller to block-relevant systems; we prompt the most-overdue
+    aging/stale one. Single source for the check-in + the calendar's this-week focus."""
+    due = [(c, t) for c, t in (targets or {}).items()
+           if systems.get(c, {}).get("confidence") in ("aging", "stale")]
+    if not due:
+        return None
+    col, t = max(due, key=lambda ct: systems[ct[0]].get("days_since") or 0)
+    ds = systems[col].get("days_since")
+    return {"system": col, "effort": t["effort"], "label": t["label"], "floor_w": t["floor_w"],
+            "stretch_w": t.get("stretch_w"), "stretch_kind": t.get("stretch_kind"),
+            "days_since": ds, "weeks": (round(ds / 7) if ds else None),
+            "sentence": _refresh_copy(t, _ago(ds))}
+
+
+def _refresh_sentence(systems, targets):
+    p = refresh_prescription(systems, targets)
+    return p["sentence"] if p else None
 
 
 def coach_card(hero, prog, watch=None, systems=None):

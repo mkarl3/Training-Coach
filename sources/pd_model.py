@@ -68,6 +68,16 @@ def fit(mmp: dict) -> dict | None:
     return {"cp": round(pr[0], 1), "pvo2max": round(float(_om3cp(_PVO2_DURATION, *pr)), 1)}
 
 
+def predict(mmp: dict, t_seconds: float) -> float | None:
+    """Modeled power (W) at `t_seconds` from the production (Pmax-pinned + threshold-weighted) Om3CP
+    fit — used to set a forward 'stretch' target at a duration the athlete hasn't ridden recently
+    (the model infers it from their other current efforts). None if the curve won't fit."""
+    pr = _fit_params(mmp, pin_pmax=True, weighted=True)
+    if pr is None or not (60 < pr[0] < 400):
+        return None
+    return float(_om3cp(np.array([float(t_seconds)]), *pr)[0])
+
+
 def fit_cp_free(mmp: dict) -> float | None:
     """Unconstrained 5-param fit — used only as the LEVEL anchor for fit()'s CP offset (jittery, but
     ~unbiased in level vs WKO). Not shown directly."""

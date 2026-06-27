@@ -283,16 +283,55 @@ def consistency(as_of: str = Query(None)):
     return consistency_gauge(_S["findings"], as_of or _S["as_of"], _S["m"])
 
 
+def _systems_with_confidence(as_of):
+    """Per-system reads (value/dir/spark) MERGED with data-freshness (last informing effort →
+    fresh/aging/stale). Single source for both the panel and the dashboard narrative, so the
+    confidence cue and Wattson's hedging never disagree. Freshness reads the cached ride MMP (the
+    PD-curve source); on any cache miss the systems still return without confidence (graceful)."""
+    reads = wm_trend.systems_read(_S["m"], as_of)
+    try:
+        from sources import metrics as strava_metrics, pull_history
+        fresh = strava_metrics.systems_freshness(list(pull_history.load_cache().values()), str(as_of))
+        for col, r in reads.items():
+            if col in fresh:
+                r.update(fresh[col])
+    except Exception:
+        pass
+    return reads
+
+
+def _refresh_targets(as_of, prog, systems):
+    """For each BLOCK-RELEVANT system that's aging/stale, the effort that would refresh it (duration +
+    wattage target grounded in the athlete's own bests). Only computes when something's actually due —
+    so a fresh block, or a block with no PD focus (Prep), costs nothing. Wattson speaks one of these."""
+    if not (prog and prog.get("state") == "ok"):
+        return {}
+    rel = plan_review.relevant_systems(prog.get("block"))
+    due = [c for c in rel if systems.get(c, {}).get("confidence") in ("aging", "stale")]
+    if not due:
+        return {}
+    targets = {}
+    try:
+        from sources import metrics as strava_metrics, pull_history
+        summ = list(pull_history.load_cache().values())
+        for c in due:
+            t = strava_metrics.refresh_target(summ, str(as_of), c)
+            if t:
+                targets[c] = t
+    except Exception:
+        pass
+    return targets
+
+
 @app.get("/api/systems")
 def systems():
     """Per-system trend readout — Threshold (mFTP), Aerobic power (pVO2max), Sprint (Pmax), and
-    Time to exhaustion (observed TTE): current value, recent direction, and a weekly sparkline.
-    'What's improving, what's stale.' Deterministic; the React component renders only."""
+    Time to exhaustion (observed TTE): current value, recent direction, a weekly sparkline, and a
+    data-confidence tier. 'What's improving, what's stale.' Deterministic; the React renders only."""
     _require_loaded()
-    m = _S.get("m")
-    if m is None:
+    if _S.get("m") is None:
         return {"systems": []}
-    reads = wm_trend.systems_read(m, _S["as_of"])          # shared with the dashboard narrative
+    reads = _systems_with_confidence(_S["as_of"])
     LABELS = {"mftp_w": ("Threshold", "mFTP"), "pvo2max_w": ("Aerobic power", "pVO2max"),
               "pmax_w": ("Sprint", "Pmax"), "tte_sec": ("Time to exhaustion", "TTE")}
     out = []
@@ -614,7 +653,7 @@ def coach_dashboard(as_of: str = Query(None)):
     watch = select(_S["findings"], ao, _S["m"])          # active alert/watch for this date
     hero = wm_trend._hero(_S["m"], ao, _S.get("plan"), watch["status"])
     prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
-    systems = wm_trend.systems_read(_S["m"], ao)          # per-system PD reads for the narrative
+    systems = _systems_with_confidence(ao)                # per-system PD reads + freshness for narrative
     card = plan_review.coach_card(hero, prog, watch=watch, systems=systems)
     # Polish the grounded paragraph groups into a coherent multi-paragraph read (cached per state;
     # deterministic fallback so the card renders even with no model/key). The UI prefers `prose`,
@@ -671,8 +710,13 @@ def _weekly_briefing():
     b = plan_review.weekly_briefing(_S["m"], _S.get("plan"), _S["status"], themes, _S["as_of"])
     b["streak"] = _checkin_streak()
     prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), _S["as_of"], _S.get("profile"))
+    systems = _systems_with_confidence(_S["as_of"])
+    b["refresh"] = plan_review.refresh_prescription(systems, _refresh_targets(_S["as_of"], prog, systems))
     if _S.get("coach"):
-        _S["coach"].weekly_briefing = plan_review.briefing_text(b)
+        bt = plan_review.briefing_text(b)
+        if b.get("refresh"):                              # let the coach narrate the prescribed test too
+            bt += "\nThis week's prescribed effort to keep the model fresh: " + b["refresh"]["sentence"]
+        _S["coach"].weekly_briefing = bt
         _S["coach"].phase_progression = _progression_text(prog)
     return b
 
@@ -840,7 +884,18 @@ def del_unavail(period_id: int):
 
 @app.get("/api/plan")
 def get_plan():
-    return _S.get("plan") or {"error": "no active season — add one to generate a plan"}
+    plan = _S.get("plan")
+    if not plan:
+        return {"error": "no active season — add one to generate a plan"}
+    out = dict(plan)
+    try:                                                  # attach this-week's refresh prescription (calendar)
+        if _S.get("m") is not None:
+            prog = plan_progression.assess_progression(_S["m"], plan, _S["as_of"], _S.get("profile"))
+            systems = _systems_with_confidence(_S["as_of"])
+            out["refresh"] = plan_review.refresh_prescription(systems, _refresh_targets(_S["as_of"], prog, systems))
+    except Exception:
+        pass
+    return out
 
 
 # ---------------- life events (historical context tagged at intake) ----------------

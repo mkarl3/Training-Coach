@@ -10,6 +10,17 @@ const DIR = {
   flat: { a: "→", c: "var(--ink-2)" },
 };
 
+// Data-confidence cue: how long since an effort actually informed this system. Fresh systems show
+// nothing (clean read); aging/stale show how long ago, and stale dims the whole card + flags it —
+// matching Wattson's narrative hedge so the number isn't read as a real move (THE ONE RULE upstream).
+function confCue(s) {
+  if (!s.confidence || s.confidence === "fresh" || s.confidence === "none") return null;
+  const wk = s.days_since != null ? Math.max(1, Math.round(s.days_since / 7)) : null;
+  if (wk == null) return s.confidence === "stale" ? "stale" : null;
+  const ago = `Last effort ${wk} week${wk === 1 ? "" : "s"} ago`;
+  return s.confidence === "stale" ? `stale · ${ago}` : ago;
+}
+
 function Spark({ pts, color }) {
   if (!pts || pts.length < 2) return null;
   const w = 132, h = 30, mn = Math.min(...pts), mx = Math.max(...pts), sp = (mx - mn) || 1;
@@ -38,19 +49,22 @@ export default function SystemsPanel({ meta }) {
       <div className="systems-grid">
         {sys.map((s) => {
           const dd = DIR[s.dir] || DIR.flat;
+          const cue = confCue(s);
+          const stale = s.confidence === "stale";
           return (
-            <div className="sys-card" key={s.key} style={{ borderTopColor: dd.c }}>
+            <div className={"sys-card" + (stale ? " sys-stale" : "")} key={s.key} style={{ borderTopColor: stale ? "var(--ink-3)" : dd.c }}>
               <div className="sys-top">
                 <span className="sys-label">{s.label}</span>
                 <span className="sys-sub">{s.sub}</span>
               </div>
               <div className="sys-val">
                 {s.value}<span className="sys-unit">{s.unit}</span>
-                <span className="sys-dir" style={{ color: dd.c }}>
+                <span className="sys-dir" style={{ color: stale ? "var(--ink-3)" : dd.c }}>
                   {dd.a} {s.delta_pct >= 0 ? "+" : ""}{s.delta_pct}%
                 </span>
               </div>
-              <Spark pts={s.spark} color={dd.c} />
+              <Spark pts={s.spark} color={stale ? "var(--ink-3)" : dd.c} />
+              {cue && <div className={"sys-conf" + (stale ? " sys-conf-stale" : "")}>{cue}</div>}
             </div>
           );
         })}
