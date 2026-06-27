@@ -18,15 +18,25 @@ def _synthetic_curve(cp, w, pmax, cpttf, a):
             for t in WINDOWS}
 
 
-def test_fit_cp_recovers_known_cp():
+def test_fit_cp_free_recovers_known_cp():
     mmp = _synthetic_curve(cp=210, w=16000, pmax=950, cpttf=2400, a=8)
-    cp = pd_model.fit_cp(mmp)
-    assert cp is not None and abs(cp - 210) < 5        # recovers the planted CP
+    cp = pd_model.fit_cp_free(mmp)
+    assert cp is not None and abs(cp - 210) < 5        # free fit recovers the planted CP
+
+
+def test_fit_cp_pinned_is_plausible_and_lower():
+    # production fit pins Pmax to the 5 s value (≠ the curve's true t→0 Pmax), so it reads LOWER —
+    # by design; metrics._series anchors the level back with the free-vs-pinned offset.
+    mmp = _synthetic_curve(cp=210, w=16000, pmax=950, cpttf=2400, a=8)
+    pin = pd_model.fit_cp(mmp); free = pd_model.fit_cp_free(mmp)
+    assert pin is not None and 60 < pin < 400
+    assert pin < free                                   # pinning shifts CP down (the offset closes it)
 
 
 def test_fit_cp_none_when_too_few_points():
-    assert pd_model.fit_cp({"180": 250, "720": 210}) is None   # < min points to fit
+    assert pd_model.fit_cp({"180": 250, "720": 210}) is None   # < min points + no 5 s anchor
     assert pd_model.fit_cp({}) is None
+    assert pd_model.fit_cp_free({}) is None
 
 
 def test_estimated_power_excluded_from_curve():

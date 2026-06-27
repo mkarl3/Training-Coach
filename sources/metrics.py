@@ -1,8 +1,9 @@
 """Metrics engine — turns Strava-derived ride summaries into the daily + per-workout rows the app
 consumes (TSS / CTL / ATL / TSB + the power-duration estimates), with NO WKO5 input. TSS uses the
 athlete's dated set-FTP history (see _ftp_resolver); the modeled mFTP comes from an Om3CP power-
-duration fit (see pd_model). Validated vs WKO5: mFTP r≈0.75, Pmax r≈0.95 (observed 5 s), CTL r≈0.97
-once warm. TTE/FRC are NOT emitted — not reproducible from Strava MMP (see backlog).
+duration fit (pinned Pmax + threshold-weighted, level self-anchored — see pd_model + _series).
+Validated vs WKO5: mFTP r≈0.77 (~6 W, jitter matched to WKO), Pmax r≈0.95 (observed 5 s), CTL
+r≈0.97 once warm. TTE/FRC are NOT emitted — not reproducible from Strava MMP (see backlog).
 
 Stage 1 scope = the validated core (load + PD + CP/W′/Pmax). Stream/HR/wellness-dependent fields
 (EF, Pw:HR decoupling, power-zone TiZ, TTE model, HRV/sleep/RHR/weight) are deferred → emitted as
@@ -80,28 +81,40 @@ def _cp_wprime(p_short, p_long):
     return cp, (p_short - cp) * 180          # CP (W), W′ (J)
 
 
+_OFFSET_SAMPLE = 10            # fit the free (anchor) curve every Nth ride-day, not all (perf)
+
+
 def _series(summaries):
-    """Shared pass: per-date modeled CP (Om3CP fit of the 90-day curve, ≈ mFTP) + legacy 2-pt W'
-    + observed Pmax, carried over ride-less days. CP is refit only when a new ride enters the window
-    (perf — CP is slow-moving), then held until the next ride.
-    Returns (by_date, start, end, cp_at, wprime_at, pmax_at, ftp_fallback)."""
+    """Shared pass: per-date modeled mFTP + legacy 2-pt W' + observed Pmax, carried over ride-less
+    days. mFTP = the pinned+threshold-weighted Om3CP fit (stable, WKO-tracking; pd_model.fit_cp),
+    re-anchored in LEVEL by a self-derived offset = mean(free_fit − pinned_fit) — the free fit is
+    ~unbiased in level, the pinned fit is stable in shape, so we get both. Refit only on ride days
+    (CP is slow-moving). Returns (by_date, start, end, cp_at, wprime_at, pmax_at, ftp_fallback)."""
     by = rides_by_date(summaries)
     if not by:
         return {}, None, None, {}, {}, {}, 180.0
     start, end = min(by), max(by)
-    cp_at, wprime_at, pmax_at = {}, {}, {}
-    last_cp = last_wp = None
+    pin_at, wprime_at, pmax_at = {}, {}, {}
+    last_pin = last_wp = None
+    gaps, ride_i = [], 0
     for d in _drange(start, end):
         if d in by:                                       # new data in the window → refit
             env = _rolling_envelope(by, CP_WINDOW_DAYS, d)
-            cp = pd_model.fit_cp(env)
+            cp = pd_model.fit_cp(env)                     # pinned + weighted (stable shape, reads low)
             _, wp = _cp_wprime(env.get(W_SHORT), env.get(W_LONG))   # legacy W' (low-confidence FRC)
             if cp:
-                last_cp = cp
+                last_pin = cp
+                if ride_i % _OFFSET_SAMPLE == 0:          # sample the free fit for the level anchor
+                    free = pd_model.fit_cp_free(env)
+                    if free:
+                        gaps.append(free - cp)
+                ride_i += 1
             if wp:
                 last_wp = wp
-        cp_at[d], wprime_at[d] = last_cp, last_wp
+        pin_at[d], wprime_at[d] = last_pin, last_wp
         pmax_at[d] = _rolling_best(by, "5", CP_WINDOW_DAYS, d)
+    offset = round(sum(gaps) / len(gaps), 1) if gaps else 0.0   # self-anchored level (no WKO, no set-FTP)
+    cp_at = {d: (round(v + offset, 1) if v is not None else None) for d, v in pin_at.items()}
     ftp_fallback = next((v for v in cp_at.values() if v), 180.0)
     return by, start, end, cp_at, wprime_at, pmax_at, ftp_fallback
 

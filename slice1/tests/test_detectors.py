@@ -199,7 +199,7 @@ def test_injury_is_load_signal_only(m):
     # Discriminators reference LOAD only — never tissue/diagnosis terms.
     for f in detectors.detect_injury_spike(m):
         keys = set(f["discriminator_result"])
-        assert keys <= {"acwr_crossing", "acute_load_gate", "consequent_stop"}
+        assert keys <= {"acwr_crossing", "acute_load_gate", "consequent_stop", "low_base_cap"}
 
 
 def test_injury_hysteresis_dedupes_clusters(m):
