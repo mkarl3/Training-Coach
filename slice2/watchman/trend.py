@@ -392,8 +392,8 @@ _SYS_DEFS = (("mftp_w", "W"), ("pvo2max_w", "W"), ("pmax_w", "W"), ("tte_sec", "
 
 
 def systems_read(m, as_of):
-    """Current value + recent direction for each modeled system, as of `as_of`. Direction = recent
-    28-day mean vs the prior 28–84-day mean, with a ±2% dead-band (rising/falling/flat). Returns a
+    """Current value + recent direction for each modeled system, as of `as_of`. Direction = a rolling
+    30-day delta (value now vs ~30 days ago), with a ±2% dead-band (rising/falling/flat). Returns a
     dict keyed by column, each {value, unit, dir, delta_pct, spark}. Deterministic; THE ONE RULE."""
     ao = pd.Timestamp(as_of)
     daily = m.daily
@@ -406,9 +406,11 @@ def systems_read(m, as_of):
         if s.empty:
             continue
         cur = float(s.iloc[-1])
-        recent = s[s.index > ao - pd.Timedelta(days=28)].mean()
-        prior = s[(s.index <= ao - pd.Timedelta(days=28)) & (s.index > ao - pd.Timedelta(days=84))].mean()
-        chg = (recent - prior) / prior * 100 if (prior and pd.notna(prior) and prior > 0) else 0.0
+        # Rolling 30-day delta: latest value vs the most recent value ~30 days back (falls back to the
+        # earliest point if the series is shorter than 30 days). Read straight off the modeled series.
+        ref = s[s.index <= ao - pd.Timedelta(days=30)]
+        prior = float(ref.iloc[-1]) if len(ref) else float(s.iloc[0])
+        chg = (cur - prior) / prior * 100 if prior else 0.0
         direction = "rising" if chg > 2 else "falling" if chg < -2 else "flat"
         value = round(cur / 60, 1) if unit == "min" else round(cur)
         sw = s.resample("W").last().dropna().tail(40)

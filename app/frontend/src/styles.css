@@ -248,6 +248,9 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-i
 .detail-plot { flex: 1; min-width: 0; }
 .detail-xax { display: flex; justify-content: space-between; font-family: var(--data); font-size: 9px; color: var(--ink-3); margin-top: 3px; }
 .detail-grid { stroke: var(--line); stroke-width: 1; }
+.detail-plotwrap { cursor: crosshair; }
+.spark-xax { display: flex; justify-content: space-between; font-family: var(--data); font-size: 8.5px; color: var(--ink-3); margin-top: 2px; }
+.sys-drawer-delta { font-family: var(--data); font-size: 11px; font-weight: 700; margin-left: 8px; }
 @media (max-width: 720px) { .systems-grid { grid-template-columns: repeat(2, 1fr); } }
 
 /* ============================ COACH — bottom Wattson bar + drawer ============================ */

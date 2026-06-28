@@ -348,7 +348,9 @@ def generate_plan(m, profile, season, events, unavailable, as_of, cfg=DEFAULT_CA
         status = "upcoming"
         actual_tss = actual_ctl = None
         if mon <= cal:
-            status = "elapsed" if we <= cal else "current"
+            # current THROUGH the week's final day; elapsed only once fully past (we < cal, not <=) —
+            # otherwise the in-progress week flips to "done" on its own last day (Sunday).
+            status = "elapsed" if we < cal else "current"
         if mon <= today:                                  # data exists for at least part of this week
             seg = daily.loc[mon.isoformat():min(we, today).isoformat(), "tss_sum"].dropna()
             actual_tss = round(float(seg.sum())) if len(seg) else 0
