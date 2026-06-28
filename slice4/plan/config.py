@@ -29,16 +29,28 @@ class CalendarConfig:
     # matrix (the WKO signal a block is working + the trigger to move on). ---
     peak_weeks: int = 2
     race_weeks: int = 1
+    # focus / target_metric / advance_when are DISPLAY copy (Wattson's voice): the generator passes
+    # them through verbatim and the gate computes on real metrics, so these never drive logic. Written
+    # as clean phrases that read after "the focus is …", "I'm watching your …", and "we move on when
+    # …", and named to the VALIDATED metrics only (no FRC — parked/unrecoverable; TTE = observed).
     canonical_blocks: tuple = field(default_factory=lambda: (
         # name,     family,  nominal_wk, focus,                 target_metric,            advance_when
-        ("Prep",    "base",  4, "frequency",          "CTL ramp on track",      "baseline set, rhythm consistent"),
-        ("Base 1",  "base",  4, "frequency+duration", "EF rising, decouple <5%", "EF plateaus / decouple <5%"),
-        ("Base 2",  "base",  4, "duration",           "EF at higher power",     "tempo TiZ ~40min, EF flattens"),
-        ("Base 3",  "base",  4, "duration+intensity", "mFTP & TTE rising",      "mFTP & TTE plateau 2-3 wk"),
-        ("Build 1", "build", 3, "intensity",          "VO2/Pmax & mFTP",        "VO2/Pmax flatten, mFTP holds"),
-        ("Build 2", "build", 3, "intensity",          "FRC / Pmax",             "FRC/Pmax plateau, fatigue high"),
-        ("Peak",    "peak",  2, "race-specific",      "TSB positive, season-best PD", "TSB positive, PD season-best"),
-        ("Race",    "taper", 1, "race / taper",       "form (TSB) positive",    "goal event"),
+        ("Prep",    "base",  4, "frequency",          "fitness ramping on schedule",
+         "you've strung together steady weeks and fitness is climbing"),
+        ("Base 1",  "base",  4, "frequency and duration", "aerobic efficiency climbing with heart-rate drift under 5%",
+         "efficiency plateaus and heart-rate drift holds under 5%"),
+        ("Base 2",  "base",  4, "duration",           "aerobic efficiency holding at higher power",
+         "you can hold ~40 min of tempo and efficiency flattens"),
+        ("Base 3",  "base",  4, "duration and intensity", "threshold (mFTP) climbing and time-to-exhaustion stretching out",
+         "mFTP and TTE plateau for 2-3 weeks"),
+        ("Build 1", "build", 3, "intensity",          "aerobic power (pVO2max) and top-end (Pmax) sharpening while threshold holds",
+         "aerobic power and top-end flatten while threshold holds"),
+        ("Build 2", "build", 3, "intensity",          "top-end (Pmax) holding as the intensity piles up",
+         "top-end plateaus and fatigue's running high"),
+        ("Peak",    "peak",  2, "race-specific",      "form (TSB) turning positive and power numbers hitting season-bests",
+         "form's positive and your power curve's at season-best"),
+        ("Race",    "taper", 1, "race and taper",     "form (TSB) up and fresh for race day",
+         "race day arrives"),
     ))
 
     # --- 50% rule (TrainerRoad "Ask a Cycling Coach" dataset analysis): a single ride above

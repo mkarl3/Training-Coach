@@ -323,6 +323,39 @@ def _refresh_targets(as_of, prog, systems):
     return targets
 
 
+def _gate_freshness(as_of):
+    """The unified staleness bundle the progression gate consumes — same systems_freshness signal as
+    the panel/narrative. {"vo2": {confidence, days, test}, "medium": {confidence, days}}. The VO2 band
+    carries the reusable 'go test' prescription so the gate's NEEDS_BENCHMARK speaks it. None on any
+    cache miss (gate then falls back to its legacy band_staleness)."""
+    try:
+        from sources import metrics as strava_metrics, pull_history
+        summ = list(pull_history.load_cache().values())
+        ao = str(as_of)
+        fresh = strava_metrics.systems_freshness(summ, ao)
+        fr = {}
+        vo2 = fresh.get("pvo2max_w")
+        if vo2 and vo2["confidence"] != "none":
+            test = None
+            if vo2["confidence"] in ("aging", "stale"):   # offer the same prescription as the check-in
+                t = strava_metrics.refresh_target(summ, ao, "pvo2max_w")
+                p = plan_review.refresh_prescription({"pvo2max_w": vo2}, {"pvo2max_w": t}) if t else None
+                test = p["sentence"] if p else None
+            fr["vo2"] = {"confidence": vo2["confidence"], "days": vo2["days_since"], "test": test}
+        md = strava_metrics.effort_recency(summ, ao, ("60",))      # 1-min anaerobic band (build→peak)
+        if md is not None:
+            fr["medium"] = {"confidence": strava_metrics.confidence_tier(md), "days": md}
+        return fr or None
+    except Exception:
+        return None
+
+
+def _assess(as_of, plan):
+    """assess_progression with the unified freshness signal threaded in (single source of staleness)."""
+    return plan_progression.assess_progression(_S["m"], plan, as_of, _S.get("profile"),
+                                               freshness=_gate_freshness(as_of))
+
+
 @app.get("/api/systems")
 def systems():
     """Per-system trend readout — Threshold (mFTP), Aerobic power (pVO2max), Sprint (Pmax), and
@@ -360,7 +393,7 @@ def progression(as_of: str = Query(None)):
     Advises; never recomputes. Returns {state:'no_plan'} when there's no active plan."""
     _require_loaded()
     ao = as_of or _S["as_of"]
-    return plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
+    return _assess(ao, _S.get("plan"))
 
 
 class HoldIn(BaseModel):
@@ -588,7 +621,7 @@ def _hold_proposal(text):
     s, plan = _S.get("season"), _S.get("plan")
     if not s or not plan or "error" in plan or not _PROGRESS_INTENT.search(text or ""):
         return None
-    prog = plan_progression.assess_progression(_S["m"], plan, _S["as_of"], _S.get("profile"))
+    prog = _assess(_S["as_of"], plan)
     if prog.get("verdict") not in ("HOLD", "PROCEED_WITH_DEBT"):
         return None
     block = prog.get("block")
@@ -652,7 +685,7 @@ def coach_dashboard(as_of: str = Query(None)):
     ao = as_of or _S["as_of"]
     watch = select(_S["findings"], ao, _S["m"])          # active alert/watch for this date
     hero = wm_trend._hero(_S["m"], ao, _S.get("plan"), watch["status"])
-    prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), ao, _S.get("profile"))
+    prog = _assess(ao, _S.get("plan"))
     systems = _systems_with_confidence(ao)                # per-system PD reads + freshness for narrative
     card = plan_review.coach_card(hero, prog, watch=watch, systems=systems)
     # Polish the grounded paragraph groups into a coherent multi-paragraph read (cached per state;
@@ -709,7 +742,7 @@ def _weekly_briefing():
     themes = _compute_advisories()
     b = plan_review.weekly_briefing(_S["m"], _S.get("plan"), _S["status"], themes, _S["as_of"])
     b["streak"] = _checkin_streak()
-    prog = plan_progression.assess_progression(_S["m"], _S.get("plan"), _S["as_of"], _S.get("profile"))
+    prog = _assess(_S["as_of"], _S.get("plan"))
     systems = _systems_with_confidence(_S["as_of"])
     b["refresh"] = plan_review.refresh_prescription(systems, _refresh_targets(_S["as_of"], prog, systems))
     if _S.get("coach"):
@@ -890,7 +923,7 @@ def get_plan():
     out = dict(plan)
     try:                                                  # attach this-week's refresh prescription (calendar)
         if _S.get("m") is not None:
-            prog = plan_progression.assess_progression(_S["m"], plan, _S["as_of"], _S.get("profile"))
+            prog = _assess(_S["as_of"], plan)
             systems = _systems_with_confidence(_S["as_of"])
             out["refresh"] = plan_review.refresh_prescription(systems, _refresh_targets(_S["as_of"], prog, systems))
     except Exception:

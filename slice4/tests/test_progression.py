@@ -104,6 +104,24 @@ def test_base_to_build_needs_benchmark_when_vo2_stale():
     assert r["verdict"] == "NEEDS_BENCHMARK"
 
 
+def test_unified_freshness_overrides_band_staleness_and_reuses_prescription():
+    # band_staleness says FRESH (vo2=5), but the unified signal says STALE with a prescription —
+    # the gate must use the unified signal (single source) and speak the prescription verbatim.
+    p, m = _base3_to_build(FU_READY, {"vo2": 5})
+    fr = {"vo2": {"confidence": "stale", "days": 70, "test": "Give me a 5-min effort — aim ~227 W."}}
+    r = prog.assess_progression(m, p, AO, freshness=fr)
+    assert r["verdict"] == "NEEDS_BENCHMARK"
+    assert r["this_week_test"] == "Give me a 5-min effort — aim ~227 W."
+    assert r["gate"]["confidence"] == "stale" and r["gate"]["stale_days"] == 70
+
+
+def test_unified_fresh_vo2_lets_a_ready_gate_advance():
+    # Unified signal says fresh -> the stale-benchmark branch is skipped even if legacy band is stale.
+    p, m = _base3_to_build(FU_READY, {"vo2": 80})       # legacy says stale...
+    r = prog.assess_progression(m, p, AO, freshness={"vo2": {"confidence": "fresh", "days": 3, "test": None}})
+    assert r["verdict"] == "ADVANCE"                    # ...unified says fresh, so it advances
+
+
 def test_never_advance_early_when_min_not_met():
     # Base 3 nominal 4 wks (floor) but only 1 current -> min not met; ready gate must NOT advance
     weeks = [wk(1, "Base 3", "base", "current", actual=195)] + \

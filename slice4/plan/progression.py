@@ -68,8 +68,12 @@ def _conf(days):
     return "fresh" if days <= AGING_DAYS else "aging" if days <= STALE_DAYS else "stale"
 
 
-def assess_progression(m, plan, as_of, profile=None):
-    """Return the deterministic phase-progression assessment for `as_of`."""
+def assess_progression(m, plan, as_of, profile=None, freshness=None):
+    """Return the deterministic phase-progression assessment for `as_of`. `freshness` (optional) is the
+    UNIFIED data-staleness signal threaded from the app — {"vo2": {confidence, days, test}, "medium":
+    {confidence, days}} sourced from the same systems_freshness the panel/narrative use, so the gate's
+    'is the VO2 anchor stale' agrees with everything else and can reuse the 'go test' prescription.
+    Falls back to m.band_staleness when not provided (tests / no ride cache)."""
     if not plan or not plan.get("weeks"):
         return {"state": "no_plan"}
     as_of = str(as_of)
@@ -107,7 +111,7 @@ def assess_progression(m, plan, as_of, profile=None):
             block_weeks.append({"week": w["week"], "ride_days": rd, "status": st,
                                 "complete": rd >= CONSISTENCY_CLEAN_MIN_RIDE_DAYS})
 
-    gate, verdict, test, branches = _gate(m, as_of, kind, block, next_block, stale, chg, compliance)
+    gate, verdict, test, branches = _gate(m, as_of, kind, block, next_block, stale, chg, compliance, freshness)
 
     # never advance early when peak-anchored: a READY gate before min_weeks holds the schedule
     if verdict == "ADVANCE" and not min_met:
@@ -130,8 +134,18 @@ def assess_progression(m, plan, as_of, profile=None):
     }
 
 
-def _gate(m, as_of, kind, block, next_block, stale, chg, compliance):
-    """Per-transition gate → (gate dict, verdict, this_week_test, branches)."""
+def _gate(m, as_of, kind, block, next_block, stale, chg, compliance, freshness=None):
+    """Per-transition gate → (gate dict, verdict, this_week_test, branches). `freshness` (when passed)
+    is the unified systems-freshness staleness; otherwise we fall back to the legacy band_staleness."""
+    fr = freshness or {}
+
+    def band(name):                                       # unified confidence/days for a gate band
+        f = fr.get(name)
+        if f:
+            return f.get("confidence"), f.get("days"), f.get("test")
+        d = stale.get(name)                               # legacy fallback (band_staleness)
+        return _conf(d), d, None
+
     if kind == "calendar":
         g = {"name": "taper (calendar)", "metric": "race date",
              "note": "Peak/taper is timed backward from the race — not a metric gate. Metrics only "
@@ -140,13 +154,12 @@ def _gate(m, as_of, kind, block, next_block, stale, chg, compliance):
 
     if kind == "base_to_build":
         fu = m.fractional_utilization(as_of)
-        days = stale.get("vo2")
-        conf = _conf(days)
+        conf, days, presc = band("vo2")                   # unified VO2 freshness + reusable prescription
         g = {"name": "fractional utilization", "metric": "mFTP / 5-min power",
              "target": f"{FU_READY_PCT:.0f}-85%", "value": (fu or {}).get("pct"),
              "detail": fu, "confidence": conf, "stale_days": days}
-        if fu is None or conf == "stale":
-            return g, "NEEDS_BENCHMARK", "a fresh 5-min max effort (your VO2 anchor is stale)", [
+        if fu is None or conf in ("stale", "none"):
+            return g, "NEEDS_BENCHMARK", presc or "a fresh 5-min max effort (your VO2 anchor is stale)", [
                 {"outcome": "benchmark done & % in 81-85% flat", "action": "advance to Build",
                  "calendar_cost": "none"},
                 {"outcome": "benchmark shows % < 80%", "action": "stay in base",
@@ -181,12 +194,12 @@ def _gate(m, as_of, kind, block, next_block, stale, chg, compliance):
         return g, "ON_TRACK", "keep showing up — fitness follows the rhythm", []
 
     if kind == "build_to_peak":
-        days = stale.get("medium")
+        conf, days, _ = band("medium")                    # unified 1-min anaerobic freshness
         g = {"name": "anaerobic impulse spent", "metric": "anaerobic TIS impulse + fatigue",
-             "confidence": _conf(days), "stale_days": days,
+             "confidence": conf, "stale_days": days,
              "note": "FRC deliberately not gated (FTP<->FRC model artifact); read fatigue + falling "
                      "impulse."}
-        if _conf(days) == "stale":
+        if conf == "stale":
             return g, "NEEDS_BENCHMARK", "a fresh ~1-min max so I can read your anaerobic state", []
         return g, "IN_PROGRESS", "produce quality top-end; we peak when it stops climbing + you're cooked", []
 

@@ -68,21 +68,35 @@ def _last_informing_effort(by, anchors, asof, days=CP_WINDOW_DAYS, frac=FRESH_FR
     return latest
 
 
+def confidence_tier(days):
+    """Shared tier from days-since-informing-effort: fresh ≤21, aging ≤42, stale >42, none if unknown.
+    Single source so the panel, narrative, AND the progression gate all agree on 'stale'."""
+    if days is None:
+        return "none"
+    return "fresh" if days <= FRESH_DAYS else "aging" if days <= AGING_DAYS else "stale"
+
+
+def effort_recency(summaries, asof, anchors):
+    """Days since the last informing effort at `anchors` (None if none in window). The generic form of
+    systems_freshness, for bands the systems list doesn't track (e.g. the gate's 1-min anaerobic)."""
+    by = rides_by_date(summaries)
+    last = _last_informing_effort(by, anchors, asof[:10]) if by else None
+    if last is None:
+        return None
+    return (dt.date.fromisoformat(asof[:10]) - dt.date.fromisoformat(last)).days
+
+
 def systems_freshness(summaries, asof):
     """Per-system data freshness as of `asof`: {col: {last_effort_date, days_since, confidence}} with
-    confidence in {fresh, aging, stale, none}. Single source for the panel cue and the narrative
-    hedging, so the two never disagree. Pure / deterministic."""
+    confidence in {fresh, aging, stale, none}. Single source for the panel cue, the narrative hedging,
+    AND the progression gate's VO2 staleness, so they never disagree. Pure / deterministic."""
     asof = asof[:10]
     by = rides_by_date(summaries)
     out = {}
     for col, anchors in SYSTEM_ANCHORS.items():
         last = _last_informing_effort(by, anchors, asof) if by else None
-        if last is None:
-            out[col] = {"last_effort_date": None, "days_since": None, "confidence": "none"}
-            continue
-        ds = (dt.date.fromisoformat(asof) - dt.date.fromisoformat(last)).days
-        conf = "fresh" if ds <= FRESH_DAYS else "aging" if ds <= AGING_DAYS else "stale"
-        out[col] = {"last_effort_date": last, "days_since": ds, "confidence": conf}
+        ds = (dt.date.fromisoformat(asof) - dt.date.fromisoformat(last)).days if last else None
+        out[col] = {"last_effort_date": last, "days_since": ds, "confidence": confidence_tier(ds)}
     return out
 
 
