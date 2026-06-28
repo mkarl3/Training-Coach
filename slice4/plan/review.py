@@ -324,6 +324,59 @@ def relevant_systems(block):
     return _BLOCK_SYSTEMS.get(block, ())
 
 
+def system_note(label, read, block, focus, is_focus):
+    """Two grounded coaching strings for one power system, given the current block context: `note`
+    (a short tag for the collapsed card) and `why` (1-3 sentences for the expanded detail — the
+    'why I care about this right now' voice). Deterministic templated copy (THE ONE RULE); a model
+    polish can later replace `why` without touching the panel. `block`/`focus` are None off-season."""
+    lab = label[0].upper() + label[1:]            # sentence-leading
+    low = label[0].lower() + label[1:]            # mid-sentence
+    pct = read.get("delta_pct") or 0
+    d = read.get("dir") or "flat"
+    delta = f"{pct:+g}%"          # signed, no trailing .0 — "climbing (+4%)" / "slipped (-3%)"
+    mag = f"{abs(pct):g}%"        # unsigned, for "up X%" phrasing
+    conf = read.get("confidence")
+    stale = conf in ("aging", "stale")
+    days = read.get("days_since")
+    wk = max(1, round(days / 7)) if days else None
+    ago = f"{wk} week{'' if wk == 1 else 's'}" if wk else "a while"
+
+    # Off-season / no plan: trend-only, no block framing.
+    if not block:
+        if d == "rising":
+            return {"note": "Climbing", "why": f"{lab} is trending up ({delta}) over the last few weeks."}
+        if d == "falling":
+            return {"note": "Sliding", "why": f"{lab} has eased off ({delta}) recently."}
+        return {"note": "Holding", "why": f"{lab} is holding steady lately."}
+
+    foc = focus or "this phase's work"
+    if is_focus:
+        if stale:
+            return {"note": "Needs a fresh effort",
+                    "why": (f"{lab} is what this block is built to move, but I haven't seen a true effort "
+                            f"here in {ago} — the read's going stale. Put in one honest, complete effort "
+                            f"this week so the number means something.")}
+        if d == "rising":
+            return {"note": "The focus — and climbing",
+                    "why": (f"{lab} is what this block is built to move, and it's climbing ({delta}). "
+                            f"The work's landing — keep the {foc} efforts coming.")}
+        if d == "falling":
+            return {"note": "The focus — watch it",
+                    "why": (f"{lab} is this block's target and it's slipped ({delta}). That's usually fatigue "
+                            f"masking fitness — make sure you're hitting the key efforts fresh, not buried.")}
+        return {"note": "The focus this block",
+                "why": (f"{lab} is what this block is built to move, but it's flat so far. Stay on the {foc} "
+                        f"work and make the hard efforts count — movement tends to show after a solid block.")}
+
+    if d == "rising" and abs(pct) >= _SYS_NOTABLE_PCT:
+        return {"note": "Bonus gains, off-focus",
+                "why": (f"Not this block's focus, but {low} is up {mag} — a nice carryover from the work "
+                        f"you're doing now. We'll sharpen it directly later in the plan.")}
+    return {"note": "Not this block's focus",
+            "why": (f"{lab} isn't the priority this block — it's holding while we build the systems this "
+                    f"phase targets. We'll come back to it when the plan calls for it.")}
+
+
 def _refresh_copy(t, ago):
     """The prescription sentence. A `peak` (all-out) effort has no target to hit — just beat the PB. A
     `model` stretch is a forward target range ('the top end's in you'). No stretch → 'confirm it'."""

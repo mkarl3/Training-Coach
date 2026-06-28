@@ -411,9 +411,13 @@ def systems_read(m, as_of):
         chg = (recent - prior) / prior * 100 if (prior and pd.notna(prior) and prior > 0) else 0.0
         direction = "rising" if chg > 2 else "falling" if chg < -2 else "flat"
         value = round(cur / 60, 1) if unit == "min" else round(cur)
-        spark = [round(float(v), 2) for v in s.resample("W").last().dropna().tail(40)]
+        sw = s.resample("W").last().dropna().tail(40)
+        # Spark points carry the SAME unit/precision as the headline value (minutes for TTE, whole
+        # watts otherwise) so the hover readout and detail axis never disagree with the big number.
+        spark = [round(float(v) / 60, 1) if unit == "min" else round(float(v)) for v in sw]
+        spark_weeks = [d.date().isoformat() for d in sw.index]   # week-end date per spark point (hover readout)
         out[col] = {"value": value, "unit": unit, "dir": direction,
-                    "delta_pct": round(chg, 1), "spark": spark}
+                    "delta_pct": round(chg, 1), "spark": spark, "spark_weeks": spark_weeks}
     return out
 
 

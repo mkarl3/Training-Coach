@@ -300,6 +300,18 @@ def _systems_with_confidence(as_of):
     return reads
 
 
+def _current_plan_week(plan, as_of):
+    """The plan week in progress as of `as_of` — the live block whose focus the systems panel frames
+    against. Prefers the calendar-`current` week; falls back to the last week already started."""
+    if not plan or "weeks" not in plan:
+        return None
+    cur = [w for w in plan["weeks"] if w.get("status") == "current"]
+    if cur:
+        return cur[0]
+    started = [w for w in plan["weeks"] if w["week_start"] <= as_of]
+    return started[-1] if started else None
+
+
 def _refresh_targets(as_of, prog, systems):
     """For each BLOCK-RELEVANT system that's aging/stale, the effort that would refresh it (duration +
     wattage target grounded in the athlete's own bests). Only computes when something's actually due —
@@ -367,12 +379,23 @@ def systems():
     reads = _systems_with_confidence(_S["as_of"])
     LABELS = {"mftp_w": ("Threshold", "mFTP"), "pvo2max_w": ("Aerobic power", "pVO2max"),
               "pmax_w": ("Sprint", "Pmax"), "tte_sec": ("Time to exhaustion", "TTE")}
+    cw = _current_plan_week(_S.get("plan"), _S["as_of"])     # current block context (None off-season)
+    block = cw["block"] if cw else None
+    focus = cw["focus"] if cw else None
+    relevant = set(plan_review.relevant_systems(block))
+    # Base/Prep/Race blocks target frequency/duration, not a power system — no card is "the focus", so
+    # the notes read as neutral trend (block=None) and nothing dims; the framing line still gives context.
+    note_block = block if relevant else None
     out = []
     for col, (label, sub) in LABELS.items():
         r = reads.get(col)
         if r:
-            out.append({"key": col, "label": label, "sub": sub, **r})
-    return {"systems": out}
+            is_focus = col in relevant
+            notes = plan_review.system_note(label, r, note_block, focus, is_focus)
+            out.append({"key": col, "label": label, "sub": sub, "relevant": is_focus, **notes, **r})
+    out.sort(key=lambda s: not s["relevant"])                # block-relevant systems lead the grid
+    return {"systems": out, "block": block, "focus": focus,
+            "building": cw["target_metric"] if cw else None}
 
 
 @app.get("/api/trend")

@@ -206,15 +206,48 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-i
 /* "Your systems" — per-system trend small-multiples (Watchman) */
 .systems-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
 .sys-card { background: var(--panel-3); border-top: 3px solid var(--ink-2); padding: 11px 12px 10px; display: flex; flex-direction: column; gap: 7px; border-radius: 4px; }
-.sys-top { display: flex; flex-direction: column; gap: 1px; }
+.sys-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.sys-top-l { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sys-top-r { display: flex; align-items: flex-start; gap: 4px; }
 .sys-label { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; color: var(--cream); }
 .sys-sub { font-size: 10.5px; color: var(--ink-3); }
+.sys-focus-badge { font-family: var(--data); font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  background: var(--gold); color: #0b0b14; padding: 2px 5px; border-radius: 2px; white-space: nowrap; margin-top: 3px; align-self: flex-start; }
+.sys-expand { background: transparent; border: 0; color: var(--ink-2); cursor: pointer; font-size: 12px; line-height: 1; padding: 1px 2px; }
+.sys-expand:hover { color: var(--cream); }
 .sys-val { font-family: var(--ui); font-weight: 800; font-size: 22px; color: var(--cream); display: flex; align-items: baseline; gap: 4px; line-height: 1; }
 .sys-unit { font-size: 12px; color: var(--ink-2); font-weight: 700; }
 .sys-dir { margin-left: auto; font-size: 12px; font-weight: 800; align-self: center; }
+.sys-note { font-size: 11px; line-height: 1.4; margin-top: -1px; }
 .sys-conf { font-family: var(--ui); font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); margin-top: -1px; }
 .sys-conf-stale { color: var(--ramp-lose); font-weight: 700; }
 .sys-card.sys-stale { opacity: 0.62; }
+.sys-card.sys-offfocus { opacity: 0.5; transition: opacity 0.12s; }
+.sys-card.sys-offfocus:hover { opacity: 1; }
+.sys-card.sys-open { box-shadow: inset 0 0 0 1px var(--line); }
+.systems-frame { font-family: var(--data); font-size: 11px; color: var(--ink-2); margin: 6px 0 0; padding-left: 9px;
+  border-left: 3px solid var(--gold); line-height: 1.45; }
+.systems-frame span { color: var(--cream); }
+.spark-wrap { cursor: crosshair; }
+.spark-cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink-2); opacity: 0.5; pointer-events: none; }
+.spark-dot { position: absolute; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--panel-3); pointer-events: none; }
+.spark-tip { position: absolute; top: -7px; transform: translate(-50%, -100%); background: var(--panel); border: 1px solid var(--line);
+  padding: 4px 7px; white-space: nowrap; box-shadow: 2px 2px 0 #00000088; pointer-events: none; z-index: 4;
+  display: flex; flex-direction: column; gap: 1px; }
+.spark-tip-wk { font-family: var(--data); font-size: 9px; color: var(--ink-2); }
+.spark-tip-val { font-size: 12px; font-weight: 700; color: var(--cream); }
+.sys-drawer { margin-top: 14px; background: var(--panel-3); border-top: 3px solid var(--jacket); border-radius: 4px; padding: 12px 14px; }
+.sys-drawer-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.sys-drawer-title { font-family: var(--ui); font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 0.04em; color: var(--cream); }
+.sys-drawer-sub { color: var(--ink-3); font-weight: 600; }
+.sys-why { font-size: 12.5px; line-height: 1.55; color: var(--ink-2); margin: 10px 0 0; max-width: 62ch; }
+.detail-chart { display: flex; gap: 7px; }
+.detail-yax { display: flex; flex-direction: column; justify-content: space-between; font-family: var(--data);
+  font-size: 9px; color: var(--ink-3); padding: 2px 0 14px; text-align: right; min-width: 30px; }
+.detail-plot { flex: 1; min-width: 0; }
+.detail-xax { display: flex; justify-content: space-between; font-family: var(--data); font-size: 9px; color: var(--ink-3); margin-top: 3px; }
+.detail-grid { stroke: var(--line); stroke-width: 1; }
 @media (max-width: 720px) { .systems-grid { grid-template-columns: repeat(2, 1fr); } }
 
 /* ============================ COACH — bottom Wattson bar + drawer ============================ */
